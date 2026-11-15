@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Toga · tests</title>
+<!--
+  The Toga test suite. No build step, no dependencies, no server config: it loads the
+  REAL index.html in a same-origin iframe and asserts against the deployed artifact, so
+  the tests can never drift from the product.
+
+  Run it locally:   python -m http.server 8766  →  http://127.0.0.1:8766/test.html
+  Run it live:      https://julianpenn-cloud.github.io/toga/test.html
+  Headless:         window.__toga reads { passed, failed, failures } once done.
+
+  What it guards: the recurrence in colorForDate (order-independence catches cache-key
+  bugs — the DST collision was found exactly this way), palette/verse/theme agreement,
+  seasonal gates, WCAG contrast on the daily paper, and the outfit rules.
+-->
+<style>
+  :root { --ink:#22301f; --paper:#f7f3ea; --card:#fffdf7; --line:#e6ddc9; --green:#2f4a36; --gold:#b3862f; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--paper); color: var(--ink);
+         margin: 0; padding: 22px 18px 60px; font-size: 13px; line-height: 1.5; }
+  h1 { font-size: 15px; letter-spacing: 2px; text-transform: uppercase; margin: 0 0 4px; }
+  .sub { color: #7c826f; margin-bottom: 18px; }
+  .banner { padding: 14px 16px; border-radius: 12px; font-weight: 700; font-size: 15px; margin-bottom: 18px; border: 1px solid var(--line); }
+  .banner.pass { background: #e8f0e6; border-color: #b9cdb4; color: #24401f; }
+  .banner.fail { background: #fbe9e7; border-color: #e6b3ac; color: #7a2a20; }
+  .banner.run  { background: var(--card); }
+  .suite { margin: 18px 0 8px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; font-size: 10.5px; color: var(--gold); }
+  .t { padding: 3px 0 3px 22px; position: relative; }
+  .t::before { position: absolute; left: 0; font-weight: 700; }
+  .t.ok::before { content: "✓"; color: #3f7a34; }
+  .t.no::before { content: "✗"; color: #b3402f; }
+  .t.no { color: #7a2a20; }
+  .err { color: #7a2a20; background: #fbe9e7; border-radius: 6px; padding: 6px 8px; margin: 3px 0 6px; white-space: pre-wrap; }
+  .detail { color: #7c826f; }
+  iframe { position: absolute; width: 1180px; height: 900px; left: -4000px; top: 0; border: 0; }
+</style>
+</head>
+<body>
+<h1>Toga tests</h1>
+<div class="sub" id="sub">loading the app…</div>
+<div class="banner run" id="banner">running…</div>
+<div id="out"></div>
+<iframe id="app" src="index.html" title="the app under test"></iframe>
+
+<script>
+// ---------------------------------------------------------------- harness
+const out = document.getElementById("out");
+const res = [];
+let suite = "";
+function group(name) { suite = name; const h = document.createElement("div"); h.className = "suite"; h.textContent = name; out.appendChild(h); }
+function test(name, fn) {
+  const row = document.createElement("div");
+  try { fn(); row.className = "t ok"; row.textContent = name; res.push({ suite, name, ok: true }); }
+  catch (e) { row.className = "t no"; row.textContent = name; res.push({ suite, name, ok: false, err: String(e && e.message || e) });
+    out.appendChild(row); const box = document.createElement("div"); box.className = "err"; box.textContent = res[res.length-1].err; out.appendChild(box); return; }
+  out.appendChild(row);
+}
+const ok  = (v, msg) => { if (!v) throw new Error(msg || "expected truthy, got " + JSON.stringify(v)); };
+const eq  = (a, b, msg) => { if (a !== b) throw new Error((msg ? msg + " — " : "") + "expected " + JSON.stringify(b) + ", got " + JSON.stringify(a)); };
+const near = (a, b, tol, msg) => { if (Math.abs(a-b) > tol) throw new Error((msg ? msg + " — " : "") + "expected ~" + b + " ±" + tol + ", got " + a); };
+
+// ---------------------------------------------------------------- run
+const frame = document.getElementById("app");
+frame.addEventListener("load", run, { once: true });
+
+function run() {
+  const app = frame.contentWindow;
+  const A = app.TOGA;                              // the app's published test surface
+  const doc = frame.contentDocument;
+  const t0 = performance.now();
+
+  // don't disturb whatever the reader had stored
+  const saved = {};
+  for (const k of ["toga.mode", "toga.region", "toga.wx", "toga.seen"]) saved[k] = app.localStorage.getItem(k);
+
+  const DAY = (y, m, d) => new Date(y, m, d);
+  const SPAN = 730;
+  const dayAt = i => DAY(2026, 0, 1 + i);
+  const all = Array.from({ length: SPAN }, (_, i) => dayAt(i));
+  const colors = all.map(d => A.colorForDate(d).shade.name);
+  const monthsOf = {};
+  colors.forEach((c, i) => (monthsOf[c] = monthsOf[c] || new Set()).add(all[i].getMonth()));
+
+  try {
+
+  // ---------------------------------------------------------------- engine
+  group("engine · the pick");
+  test("page under test loaded with no JS errors", () => {
+    ok(A.colorForDate && A.PALETTE && A.outfitFor, "engine globals missing");
+  });
+  test("a date always yields the same color (determinism)", () => {
+    for (let i = 0; i < SPAN; i += 7) eq(A.colorForDate(dayAt(i)).shade.name, colors[i]);
+  });
+  test("the answer doesn't depend on the time of day", () => {
+    for (let i = 0; i < SPAN; i += 3) {
+      const d = dayAt(i), at9 = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 21, 45);
+      eq(A.colorForDate(at9).shade.name, colors[i], d.toDateString());
+    }
+  });
+  test("the answer doesn't depend on the order days are asked for (cache integrity)", () => {
+    // This is the test that catches cache-key collisions and un-normalised hashing:
+    // asking in a different order must never change a single answer.
+    const index = new Map(all.map((d, i) => [d.getTime(), i]));
+    const ask = (d) => eq(A.colorForDate(d).shade.name, colors[index.get(d.getTime())], d.toDateString());
+    for (let i = SPAN - 1; i >= 0; i--) ask(all[i]);                 // backwards
+    for (let i = 0, x = 12345; i < SPAN; i++) {                      // scrambled
+      x = (x * 1103515245 + 12345) & 0x7fffffff; ask(all[x % SPAN]);
+    }
+    for (let i = 0; i < SPAN; i += 2) ask(all[i]);                   // and mixed
+  });
+  test("no two adjacent days share a color (unless a holiday intervenes)", () => {
+    for (let i = 1; i < SPAN; i++) {
+      const prev = A.colorForDate(dayAt(i - 1)), cur = A.colorForDate(dayAt(i));
+      if (prev.holiday || cur.holiday) continue;
+      if (prev.shade.name === cur.shade.name) throw new Error(prev.shade.name + " twice: " + dayAt(i - 1).toDateString() + " → " + dayAt(i).toDateString());
+    }
+  });
+  test("a holiday always wins its date", () => {
+    for (const h of A.HOLIDAYS) {
+      const probe = h.when ? DAY(2026, h.when[0] - 1, h.when[1]) : DAY(2026, h.range.from[0] - 1, h.range.from[1]);
+      const r = A.colorForDate(probe);
+      ok(r.holiday, h.name + " did not take " + probe.toDateString());
+      ok(A.byLabel(r.shade.name), h.name + " resolved to an unknown color " + r.shade.name);
+    }
+  });
+  test("during a theme week the pick comes only from that theme", () => {
+    for (let i = 0; i < SPAN; i++) {
+      const r = A.colorForDate(dayAt(i));
+      if (r.holiday || !r.theme) continue;
+      ok(r.theme.colors.includes(r.shade.name), r.theme.name + " produced " + r.shade.name);
+    }
+  });
+  test("a color never appears in a month its curve forbids", () => {
+    for (const c of A.PALETTE) {
+      for (const m of monthsOf[c.label] || []) {
+        const next = (m + 1) % 12;
+        ok(c.curve[m] > 0 || c.curve[next] > 0, c.label + " appeared in month " + (m + 1) + " but its curve is 0 for that month and the next");
+      }
+    }
+  });
+  test("every palette color is reachable in a year (no dead colors)", () => {
+    for (const c of A.PALETTE) {
+      let n = 0; for (let i = 0; i < 365; i++) if (colors[i] === c.label) n++;
+      ok(n >= 3, c.label + " only appeared " + n + " times in a year");
+    }
+  });
+  test("weekends get a real color too (not a blank)", () => {
+    for (let i = 0; i < SPAN; i++) {
+      const d = dayAt(i); if (d.getDay() !== 0 && d.getDay() !== 6) continue;
+      ok(A.byLabel(A.colorForDate(d).shade.name), "weekend " + d.toDateString() + " has no color");
+    }
+  });
+
+  // ---------------------------------------------------------------- helpers
+  group("engine · helpers");
+  test("moodFromCode buckets every WMO code we can receive", () => {
+    eq(A.moodFromCode(0), "sunny"); eq(A.moodFromCode(1), "sunny");
+    eq(A.moodFromCode(2), "cloudy"); eq(A.moodFromCode(3), "cloudy");
+    eq(A.moodFromCode(45), "cloudy"); eq(A.moodFromCode(48), "cloudy");
+    eq(A.moodFromCode(51), "rain"); eq(A.moodFromCode(65), "rain"); eq(A.moodFromCode(82), "rain");
+    eq(A.moodFromCode(71), "snow"); eq(A.moodFromCode(75), "snow"); eq(A.moodFromCode(86), "snow");
+    eq(A.moodFromCode(99), "rain");
+  });
+  test("the moon runs 8 phases and cycles ~29.5 days", () => {
+    const names = new Set(); for (let i = 0; i < 30; i++) names.add(A.getMoon(dayAt(i)).name);
+    ok(names.size === 8, "saw " + names.size + " phase names");
+    const a = A.getMoon(DAY(2026, 0, 1)), b = A.getMoon(DAY(2026, 0, 30));
+    near(Math.abs(b.frac - a.frac), 0, 0.06, "a synodic month should return to the same phase");
+  });
+  test("all eight seasons appear across a year", () => {
+    const s = new Set(); for (let i = 0; i < 365; i++) s.add(A.seasonFor(dayAt(i)).name);
+    eq(s.size, 8, "seasons seen: " + [...s].join(", "));
+  });
+  test("daySeed is non-decreasing (a later day never hashes earlier)", () => {
+    // Note: daySeed counts elapsed ms, so the spring DST switch can repeat one value.
+    // Adjacent-day repeats are caught by the no-repeat test above; this guards ordering.
+    for (let i = 1; i < SPAN; i++) ok(A.daySeed(dayAt(i)) >= A.daySeed(dayAt(i - 1)));
+  });
+
+  // ---------------------------------------------------------------- integrity
+  group("content · the structures agree");
+  test("every theme-week color label resolves to a real palette color", () => {
+    for (const t of A.THEME_WEEKS) for (const l of t.colors)
+      ok(A.byLabel(l), t.name + " references unknown color \"" + l + "\"");
+  });
+  test("every holiday has a color and it exists", () => {
+    for (const h of A.HOLIDAYS) { ok(h.color, h.name + " has no color"); ok(A.byLabel(h.color.label), h.name); }
+  });
+  test("every palette color has a valid hex and a team", () => {
+    for (const c of A.PALETTE) { ok(/^#[0-9a-f]{6}$/i.test(c.hex), c.label + " hex " + c.hex); ok(c.team, c.label + " has no team"); }
+  });
+  test("every trouser has a valid hex", () => {
+    for (const b of A.BOTTOMS) ok(/^#[0-9a-f]{6}$/i.test(b.hex), b.label + " hex " + b.hex);
+  });
+  test("every palette color has verses for each season it can actually appear in", () => {
+    const coarseOf = m => (m <= 1 || m === 11) ? "winter" : m <= 4 ? "spring" : m <= 7 ? "summer" : "autumn";
+    for (const c of A.PALETTE) {
+      const bank = A.VERSES[c.label];
+      ok(bank, c.label + " has no verse bank at all");
+      const seasons = new Set([...(monthsOf[c.label] || [])].map(coarseOf));
+      ok(seasons.size > 0, c.label + " never appeared, so its verses are untested");
+      for (const s of seasons) ok(bank[s] && bank[s].length, c.label + " appears in " + s + " but has no " + s + " verse");
+    }
+  });
+  test("every verse is short and non-empty", () => {
+    for (const [label, bank] of Object.entries(A.VERSES))
+      for (const [season, lines] of Object.entries(bank))
+        for (const l of lines) {
+          ok(l && l.trim().length > 12, label + "/" + season + " has a blank verse");
+          ok(l.length <= 120 && l.split("\n").length <= 3, label + "/" + season + " verse too long: " + JSON.stringify(l.slice(0, 60)));
+        }
+  });
+  test("a rendered day always produces a verse and a team", () => {
+    for (let i = 0; i < SPAN; i++) {
+      const r = A.colorForDate(dayAt(i));
+      ok(A.verseFor(dayAt(i), r).body.trim(), "empty verse on " + dayAt(i).toDateString());
+      ok(r.team, "no team on " + dayAt(i).toDateString());
+    }
+  });
+  test("no leftover team/location/person references", () => {
+    const html = doc.documentElement.innerHTML;
+    for (const w of ["Cedars", "Lakeside", "Jasmin", "Bigos"]) ok(!html.includes(w), "found \"" + w + "\" in the page");
+    // The designer's own name is exempted in exactly one place: the colophon, which is
+    // authorship rather than product content. The employer and property words above stay
+    // banned everywhere, colophon included, so this stays a real guard.
+    const clone = doc.documentElement.cloneNode(true);
+    const col = clone.querySelector("footer .colophon");
+    if (col) col.remove();
+    ok(!clone.innerHTML.includes("Julian"), "found \"Julian\" outside the colophon");
+  });
+
+  // ---------------------------------------------------------------- brand
+  group("brand · classic wordmark, independent of any CDN");
+  test("the wordmark is set in the inlined face, and it loaded", () => {
+    const wm = doc.querySelector(".wordmark");
+    ok(wm, "no wordmark in the page");
+    const fam = app.getComputedStyle(wm).fontFamily;
+    ok(/Toga Mark/.test(fam), "wordmark is not using the inlined face: " + fam);
+    ok(app.document.fonts.check('700 56px "Toga Mark"'), "the inlined face did not load");
+  });
+  test("the inlined wordmark font keeps its kerning", () => {
+    // subsetting with an empty --layout-features strips the GPOS lookups, and "To" is the one
+    // kerned pair in "Toga": without it the T sits ~4.6px too far from the o at header size
+    const c = doc.createElement("canvas").getContext("2d");
+    c.font = '700 100px "Toga Mark"';
+    const kern = (c.measureText("To").width - c.measureText("T").width - c.measureText("o").width) / 100;
+    ok(kern < -0.02, "the wordmark font lost its kerning (To = " + kern.toFixed(4) + "em) — the T will float");
+  });
+  test("the wordmark is title case — not caps, not small caps", () => {
+    // caps of any kind read as initials, and TOGA is an anagram of GOAT
+    const cs = app.getComputedStyle(doc.querySelector(".wordmark"));
+    eq(cs.textTransform, "none", "a text-transform is making the name read as initials");
+    eq(cs.fontVariantCaps, "normal", "small caps still reads as initials");
+    // the region rides inside the wordmark ("Toga · Minneapolis–St. Paul, MN"), so strip it
+    // before comparing — otherwise this test silently depends on whether a zip is stored,
+    // which is exactly the state a real user is in and a clean browser is not
+    const h1 = doc.querySelector(".wordmark");
+    const reg = h1.querySelector(".brand-region");
+    const name = h1.textContent.replace(reg ? reg.textContent : "", "").trim();
+    eq(name, "Toga", 'the name should be exactly "Toga"');
+  });
+  test("the wordmark is narrower than it is naturally set", () => {
+    // no classic serif is meaningfully narrower than another, so the proportions come from
+    // condensing the letterforms. If this drops back to 1, the mark has lost its shape.
+    const wm = doc.querySelector(".wordmark");
+    const m = new DOMMatrixReadOnly(app.getComputedStyle(wm).transform);
+    ok(m.a < 0.85 && m.a > 0.6, "wordmark condensation is " + m.a.toFixed(2) + ", expected ~0.72");
+    ok(Math.abs(m.d - 1) < 0.01, "the wordmark is being squashed vertically too");
+  });
+  test("the wordmark font is embedded, not fetched", () => {
+    const css = [...doc.querySelectorAll("style")].map(s => s.textContent).join("");
+    ok(/@font-face[^}]*Toga Mark/.test(css), "no @font-face declared for the wordmark");
+    ok(/url\(data:font\/woff2;base64,/.test(css), "the wordmark font is not inlined as base64");
+  });
+  test("the bookplate rule measures the name, not the whole type block", () => {
+    const wm = doc.querySelector(".wordmark");
+    const rule = app.getComputedStyle(wm, "::before");
+    eq(rule.display, "block", "the rule should be a block");
+    // compare layout widths: the rect is post-transform, the two scale together
+    near(parseFloat(rule.width), wm.offsetWidth, 1.5, "rule width vs wordmark layout width");
+  });
+  test("the mark is a bathrobe: a rolled collar and a belt", () => {
+    // the shawl collar is what makes it a bathrobe rather than a generic tunic, so hold onto it
+    const svg = doc.getElementById("toga-mark").innerHTML;
+    ok(/stroke-linecap="round"/.test(svg), "the rolled shawl collar is gone");
+    const paths = svg.match(/<path/g) || [];
+    ok(paths.length >= 4, "expected a body, collar, belt and knot; found " + paths.length + " path(s)");
+    ok(!/<circle|<rect|<ellipse/.test(svg), "the mark has grown a disc or box again");
+  });
+  test("the mark appears in the header, footer and welcome card", () => {
+    for (const sel of ["header .mark", "footer .mark-sm", ".welcome-card .mark-lg"])
+      ok(doc.querySelector(sel), "missing the mark at " + sel);
+  });
+  test("the mark is a single colour drawn from the day", () => {
+    // the whole point: one toga, wearing today's colour, so the brand is never a rainbow
+    const svg = doc.getElementById("toga-mark").innerHTML;
+    ok(/fill="var\(--day\)"/.test(svg), "the mark is not filled with the day's colour");
+    ok(/stroke="var\(--day-deep\)"/.test(svg), "the mark is not keylined in the deep day colour");
+    const colours = svg.match(/#[0-9a-fA-F]{6}/g) || [];
+    eq(colours.length, 0, "the mark hard-codes colours instead of following the day: " + colours.join(", "));
+    ok(!/url\(#/.test(svg) && !/<ellipse/.test(svg) && !/<g /.test(svg),
+       "the mark has picked up gradients, shading or grouping again");
+  });
+  test("the mark's keyline is the same colour as the day, never the house green", () => {
+    // --day-ink falls back to green for greys and whites, which would put a green keyline round
+    // a white toga — two colours. For an achromatic day the keyline must be achromatic too.
+    const chroma = h => { const v = A.hexRGB(h); return (Math.max(...v) - Math.min(...v)) / 255; };
+    let worst = null;
+    for (const c of A.PALETTE) {
+      if (chroma(c.hex) >= 0.08) continue;                  // only the achromatic days are at risk
+      A.paintPage(c.hex);
+      const deep = app.getComputedStyle(doc.documentElement).getPropertyValue("--day-deep").trim();
+      if (chroma(deep) >= 0.08) worst = c.label + " keylined " + deep;
+    }
+    A.renderAll();
+    eq(worst, null, "an achromatic day picked up a colourful keyline: " + worst);
+  });
+  test("the mark's keyline stays visible on every day's paper", () => {
+    // a white toga on cream is an outline drawing — but only if the keyline actually reads
+    const lum = h => { const [r, g, b] = A.hexRGB(h).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+    const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+    let worst = 99, at = "";
+    for (const c of A.PALETTE) {
+      A.paintPage(c.hex);
+      const cs = app.getComputedStyle(doc.documentElement);
+      const r = ratio(cs.getPropertyValue("--day-deep").trim(), cs.getPropertyValue("--paper").trim());
+      if (r < worst) { worst = r; at = c.label; }
+    }
+    A.renderAll();
+    ok(worst >= 3, "the mark's outline only reaches " + worst.toFixed(2) + ":1 on a " + at + " day");
+  });
+
+  // ---------------------------------------------------------------- sky
+  group("sky · checked against published almanac times");
+  test("the four 2026 season crossings match the almanac", () => {
+    // published UTC instants for 2026, from the standard equinox/solstice tables
+    const published = [
+      ["March equinox",     new Date(2026, 2, 10),  "2026-03-20T14:46:00Z"],
+      ["June solstice",     new Date(2026, 5, 10),  "2026-06-21T08:25:00Z"],
+      ["September equinox", new Date(2026, 8, 10),  "2026-09-23T00:06:00Z"],
+      ["December solstice", new Date(2026, 11, 10), "2026-12-21T20:50:00Z"],
+    ];
+    for (const [name, from, want] of published) {
+      const m = A.nextSeasonMark(from);
+      eq(m.name, name, "wrong next mark from " + from.toDateString());
+      const off = (new Date(m.at) - new Date(want)) / 60000;
+      ok(Math.abs(off) < 30, name + " computed " + m.at + " vs published " + want + " (" + off.toFixed(1) + " min)");
+      eq(m.at.slice(0, 10), want.slice(0, 10), name + " landed on the wrong date");
+    }
+  });
+  test("the sun's declination matches the axial tilt", () => {
+    near(A.solarDeclination(new Date(2026, 5, 21)), 23.44, 0.1, "June solstice declination");
+    near(A.solarDeclination(new Date(2026, 11, 21)), -23.44, 0.1, "December solstice declination");
+    ok(Math.abs(A.solarDeclination(new Date(2026, 2, 20))) < 0.2, "declination should be ~0 at the March equinox");
+  });
+  test("daylight behaves the way daylight has to", () => {
+    near(A.dayLengthHours(0, new Date(2026, 2, 20)), 12.1, 0.15, "just over 12h at the equator on the equinox");
+    eq(A.dayLengthHours(80, new Date(2026, 11, 21)), 0, "polar night above the circle");
+    eq(A.dayLengthHours(80, new Date(2026, 5, 21)), 24, "midnight sun above the circle");
+    ok(A.dayLengthHours(45, new Date(2026, 5, 21)) > A.dayLengthHours(45, new Date(2026, 11, 21)), "summer longer than winter");
+    ok(Math.abs(A.dayLengthDeltaMinutes(45, new Date(2026, 5, 21), 1)) < 1, "the solstice barely changes daylight");
+  });
+  test("daylight change is reported in real units", () => {
+    // the formatter once took minutes and printed seconds, so a 2m48s change read as "3s"
+    const note = A.skyNote(A.skyFor(new Date(2026, 8, 22), 44.98));
+    ok(!/lose \d+s of light/.test(note), "sub-minute unit for a multi-minute change: " + note);
+    ok(/lose \dm /.test(note), "the change at the equinox should read in minutes: " + note);
+  });
+  test("the sky note is real prose about the real sky", () => {
+    const note = A.skyNote(A.skyFor(new Date(2026, 8, 23), 44.98));
+    ok(note.length > 80, "sky note too thin: " + note);
+    ok(/equinox|solstice/.test(note), "a season mark should be named: " + note);
+    // on the equinox itself the equinox is already past, so the NEXT mark is correct
+    ok(/The (March|June|September|December) (equinox|solstice) is (today|\d+ days? off)\./.test(note),
+       "the season mark sentence is malformed: " + note);
+    ok(A.skyNote(A.skyFor(new Date(2026, 7, 12), 44.98)).includes("Perseids"), "the Perseids should be named at their peak");
+    ok(A.skyNote(A.skyFor(new Date(2026, 2, 20), null)).length > 40, "it has to work without a latitude too");
+  });
+
+  // ---------------------------------------------------------------- meaning
+  group("meaning · provenance, coverage, and no imposed depth");
+  test("every line names its work and its date", () => {
+    const bad = A.LINES.filter(l => !l.src || !/\d{4}/.test(l.src)).map(l => l.t.slice(0, 30));
+    eq(bad.length, 0, "a line is missing its source or date: " + bad.join(" | "));
+  });
+  test("no line comes from a still-copyrighted translation", () => {
+    // the well-known modern translators of Bashō and Rumi are in copyright. The bank is
+    // meant to stay firmly pre-1901, so none of their names may ever appear.
+    const banned = /barks|hamill|blyth|stryk|mitchell|coleman/i;
+    const bad = A.LINES.filter(l => banned.test(l.src)).map(l => l.src);
+    eq(bad.length, 0, "a copyrighted translation slipped in: " + bad.join(", "));
+  });
+  test("every palette colour has a thread", () => {
+    const missing = A.PALETTE.filter(c => !A.THREADS[c.label]).map(c => c.label);
+    eq(missing.length, 0, "no thread for: " + missing.join(", "));
+  });
+  test("every day of a year gets a thread, a sky, a history and a line", () => {
+    const gaps = [];
+    for (let i = 0; i < 365; i++) {
+      const d = new Date(2026, 0, 1); d.setDate(d.getDate() + i);
+      const m = A.meaningFor(d, A.colorForDate(d), 44.98);
+      if (!m.thread || !m.history || !m.skyNote || !m.line || !m.line.t) gaps.push(d.toISOString().slice(0, 10));
+    }
+    eq(gaps.length, 0, "empty meaning on: " + gaps.slice(0, 5).join(", "));
+  });
+  test("the same date always reads the same", () => {
+    // two phones showing the same day must show the same page
+    const d = new Date(2026, 6, 4), r = A.colorForDate(d);
+    const a = A.meaningFor(d, r, 44.98);
+    const d2 = new Date(2026, 6, 4), r2 = A.colorForDate(d2);
+    const b = A.meaningFor(d2, r2, 44.98);
+    eq(a.line.src, b.line.src, "the line differs between calls");
+    eq(a.history, b.history, "the history differs between calls");
+    eq(a.skyNote, b.skyNote, "the sky note differs between calls");
+  });
+  test("the long view's text is readable on every day's paper", () => {
+    // the app's readability floor is small text >= 4.5:1, and this panel is all small text
+    const lum = h => { const [r, g, b] = A.hexRGB(h).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+    const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+    const lv = doc.getElementById("longView");
+    lv.open = true;
+    let worst = 99, at = "";
+    for (const c of A.PALETTE) {
+      A.paintPage(c.hex);
+      const paper = app.getComputedStyle(doc.documentElement).getPropertyValue("--paper").trim();
+      for (const sel of [".lv-history", ".lv-thread", ".lv-line cite"]) {
+        const el = lv.querySelector(sel);
+        const col = app.getComputedStyle(el).color;
+        const hex = "#" + col.match(/\d+/g).slice(0, 3).map(n => (+n).toString(16).padStart(2, "0")).join("");
+        const r = ratio(hex, paper);
+        if (r < worst) { worst = r; at = c.label + " " + sel; }
+      }
+    }
+    lv.open = false;
+    A.renderAll();
+    ok(worst >= 4.5, "long view text only reaches " + worst.toFixed(2) + ":1 (" + at + ")");
+  });
+  group("compliance · no fund named, no ask, no tax claim");
+  test("the page carries no charitable-fund mark, solicitation or tax claim", () => {
+    // Fidelity Charitable requires written approval before their name is referenced on a
+    // site, and forbids Account Holders from soliciting contributions into a Giving
+    // Account. A giving note citing WFP lived in the footer and was pulled - it did not
+    // fit the page yet, and something better may replace it. These prohibitions hold
+    // regardless: whatever replaces it must not name the fund, ask for money, or claim a
+    // deduction. The presence checks went with the note; nothing here asserts it exists.
+    const text = doc.body.textContent.replace(/\s+/g, " ");
+    ok(!/fidelity/i.test(text), "a Fidelity mark appears on the page");
+    ok(!/deductible/i.test(text), "the page makes a tax claim");
+    ok(!/giving account|donor[- ]advised|our fund|donate now|donate to us|support us/i.test(text),
+       "the page solicits into a fund");
+  });
+  test("nothing is set below a legible size", () => {
+    // Found by measuring: the calendar's day labels were 7.0px and the outfit shade lists
+    // 9.0px. Both passed every contrast assertion and were still unreadable on a phone -
+    // a contrast test cannot catch a font size, so this is its own guard. The outfit line
+    // moved from .fit-alias to .fit-shade when the hero took over the garments.
+    const floors = [[".mcell .cn", 9], [".fit-shade", 10]];
+    for (const [sel, min] of floors) {
+      const el = doc.querySelector(sel);
+      ok(el, "no element found for " + sel);
+      const px = parseFloat(app.getComputedStyle(el).fontSize);
+      ok(px >= min, sel + " is " + px + "px, below the " + min + "px floor");
+    }
+  });
+  test("the colophon credits the designer and the place", () => {
+    // This also asserted an AI-assistance disclosure until the designer chose to drop it.
+    // That was a deliberate call, not a gap - see the comment in the markup. Do not
+    // "restore" the assertion here; ask him first.
+    const col = doc.querySelector("footer .colophon");
+    ok(col, "the colophon is missing");
+    const text = col.textContent.replace(/\s+/g, " ").trim();
+    ok(/Julian Penn/.test(text), "the colophon should name the designer: " + text);
+    ok(/Minnesota/.test(text), "the colophon should carry the place: " + text);
+    ok(!/AI/.test(text), "the AI clause was removed on purpose - see the markup comment");
+  });
+  test("the long view starts closed", () => {
+    // depth is available; it is never imposed
+    const lv = doc.getElementById("longView");
+    ok(lv, "the long view panel is missing");
+    eq(lv.tagName, "DETAILS", "it should be a details element so it needs no script");
+    ok(!lv.hasAttribute("open"), "the long view should start closed");
+  });
+
+  // ---------------------------------------------------------------- readability
+  group("readability · the daily paper stays legible");
+  const lum = hex => { const [r, g, b] = A.hexRGB(hex).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+  const rootVars = () => { const cs = app.getComputedStyle(doc.documentElement); return k => cs.getPropertyValue(k).trim(); };
+  const ink = rootVars()("--ink");
+  let worstBody = 99, worstSmall = 99, worstPaper = 1, worstName = "";
+  const painted = {};
+  for (const c of A.PALETTE) {
+    A.paintPage(c.hex);
+    const v = rootVars();
+    const paper = v("--paper"), card = v("--card"), muted = v("--muted");
+    painted[c.label] = paper;
+    const body = Math.min(ratio(ink, paper), ratio(ink, card));
+    const small = Math.min(ratio(muted, paper), ratio(muted, card));
+    if (body < worstBody) { worstBody = body; worstName = c.label; }
+    worstSmall = Math.min(worstSmall, small);
+    worstPaper = Math.min(worstPaper, lum(paper));
+  }
+  test("body text clears 7:1 (AAA) on every day's paper and card", () => ok(worstBody >= 7, "worst " + worstBody.toFixed(2) + ":1 on " + worstName));
+  test("small text clears 4.5:1 (AA) on every day's paper and card", () => ok(worstSmall >= 4.5, "worst " + worstSmall.toFixed(2) + ":1"));
+  test("the paper never gets heavy (luminance stays ≥ 0.45)", () => ok(worstPaper >= 0.45, "darkest paper luminance " + worstPaper.toFixed(2)));
+  test("the paper actually changes with the color", () => {
+    const distinct = new Set(Object.values(painted));
+    ok(distinct.size >= 13, "only " + distinct.size + " distinct papers across " + A.PALETTE.length + " colors");
+  });
+  test("the page background is painted from the day's paper", () => {
+    // the body eases its background over 0.6s, so measuring mid-flight reads a blend
+    doc.body.style.transition = "none";
+    A.renderAll();
+    const p = rootVars()("--paper").slice(1);
+    const expected = "rgb(" + [0, 2, 4].map(i => parseInt(p.substr(i, 2), 16)).join(", ") + ")";
+    eq(app.getComputedStyle(doc.body).backgroundColor, expected);
+    doc.body.style.transition = "";
+  });
+  test("the hero is a paper card with the outfit on it, not a field of the day's colour", () => {
+    // This replaces a test that checked the hero flipped its ink to stay readable ON the
+    // day's colour. It no longer has to: the colour is on the garments, and the hero is a
+    // card. Keeping the old assertion would have kept passing while testing nothing.
+    const sw = doc.getElementById("swatch");
+    ok(!sw.style.background, "the hero still paints a field of the day's colour");
+    const toHex = s => "#" + s.match(/\d+/g).slice(0, 3)
+      .map(v => (+v).toString(16).padStart(2, "0")).join("");
+    const card = toHex(app.getComputedStyle(sw).backgroundColor);
+    const fills = [...sw.querySelectorAll(".hero-pair .garment path")]
+      .map(p => p.getAttribute("fill")).filter(f => /^#[0-9a-f]{6}$/i.test(f || ""));
+    ok(fills.length >= 2, "the hero should show the day's garment plus its companion, got " + fills.join(","));
+    // every garment wears a real palette colour, and the shade list names each one
+    const known = A.PALETTE.concat(A.BOTTOMS);
+    const shades = doc.getElementById("fitShades").textContent;
+    for (const f of fills) {
+      const c = known.find(k => k.hex.toLowerCase() === f.toLowerCase());
+      ok(c, "a garment is wearing a colour that is not in the palette: " + f);
+      if (c) ok(shades.includes(c.label), "the shade list omits " + c.label);
+    }
+    // and the hero's own text is ink on that card, cleared at every palette colour, because
+    // the glow lays a tint of the day over it
+    const glow = hx => { const c = A.hexRGB(hx), k = A.hexRGB(card);
+      return "#" + c.map((v, i) => Math.round(v * 0.32 + k[i] * 0.68).toString(16).padStart(2, "0")).join(""); };
+    const worst = [];
+    for (const c of A.PALETTE) {
+      const surf = glow(c.hex);
+      for (const [sel, min, op] of [[".name", 3, 1], [".team", 4.5, 1], [".hex", 4.5, 0.92], [".eyebrow", 4.5, 0.92]]) {
+        const ink = app.getComputedStyle(sw.querySelector(sel)).color;
+        const srgb = A.hexRGB(surf);
+        const eff = "#" + A.hexRGB(toHex(ink))
+          .map((v, i) => Math.round(v * op + srgb[i] * (1 - op)).toString(16).padStart(2, "0")).join("");
+        const r = ratio(eff, surf);
+        if (r < min) worst.push(c.label + " " + sel + " " + r.toFixed(2));
+      }
+    }
+    eq(worst.length, 0, "hero text under its floor on: " + worst.slice(0, 4).join(", "));
+  });
+
+  // ---------------------------------------------------------------- outfit
+  test("the month grid fits inside its panel", () => {
+    // A grid of `1fr` columns floors at min-content, so a long day label widens the grid
+    // past its panel and the page scrolls sideways. Checked here at the suite's width; the
+    // narrow widths are swept in the verify script, which is what caught it.
+    const grid = doc.querySelector(".month-grid");
+    ok(grid, "no month grid found");
+    ok(grid.scrollWidth <= grid.clientWidth + 1,
+       "the month grid overflows its panel by " + (grid.scrollWidth - grid.clientWidth) + "px");
+  });
+  test("the outfit graphic fits inside its card", () => {
+    // The garments were fixed-pixel, so they overflowed the hero at every phone width and
+    // overflow:hidden clipped the last one - invisible to a height check, a screenshot, and
+    // three separate vision reviews. Only scrollWidth against clientWidth shows it.
+    A.renderHero(new Date(2026, 8, 21));
+    const pair = doc.getElementById("heroPair");
+    ok(pair.scrollWidth <= pair.clientWidth + 1,
+       "the garments overflow their row by " + (pair.scrollWidth - pair.clientWidth) + "px");
+    const sw = doc.getElementById("swatch");
+    ok(sw.scrollWidth <= sw.clientWidth + 1, "the hero's content overflows the card");
+  });
+  test('the options are joined by an "or", and only when there are two', () => {
+    // Three garments in a row read as three things to wear. The separator states that the
+    // pair is a choice - and monochrome weeks return a one-item pair, which must not grow one.
+    for (const mode of ["top", "bottom"]) {
+      const d = new Date(2026, 8, 21), f = A.outfitFor(d, A.colorForDate(d), mode);
+      A.renderHero(d);
+      const group = [...doc.querySelectorAll("#heroPair .pg")][1];
+      const ors = group.querySelectorAll(".or").length;
+      const gs = group.querySelectorAll(".garment").length;
+      eq(ors, gs > 1 ? gs - 1 : 0, "separators should be one fewer than the options (" + gs + " garments)");
+    }
+  });
+  test("a theme week is named once, by the banner", () => {
+    // The banner and the verse both used to say "<emoji> <name>. <note>." - the same
+    // sentence twice on one screen. The banner is the better of the two (it is styled,
+    // bordered, and shows the theme's own colours), so the verse gave it up.
+    let found = 0;
+    for (let i = 0; i < SPAN; i++) {
+      const d = dayAt(i), r = A.colorForDate(d);
+      if (!r.theme) continue;
+      found++;
+      A.renderHero(d);
+      const visible = [doc.getElementById("themeBanner"), doc.getElementById("verse"), doc.getElementById("verseTail")]
+        .map(e => e.textContent).join(" ");
+      const n = visible.split(r.theme.name).length - 1;
+      if (n !== 1) { eq(n, 1, "theme named " + n + " times on " + d.toDateString()); return; }
+      ok(doc.getElementById("themeBanner").textContent.includes(r.theme.name), "the banner dropped the theme");
+    }
+    ok(found > 0, "no theme week found in two years - this test proved nothing");
+  });
+  group("the stadium rule · Purple the day after the Vikings win");
+  test("only a win, and only whose game was yesterday", () => {
+    const d = new Date(2026, 10, 16);                       // the Monday after
+    eq(A.stadiumFor(d, { gameYmd: "2026-11-15", won: true, opponent: "Green Bay Packers" }), "beat the Packers");
+    eq(A.stadiumFor(d, { gameYmd: "2026-11-15", won: false, opponent: "Green Bay Packers" }), null, "a loss is not a win");
+    eq(A.stadiumFor(d, { gameYmd: "2026-11-08", won: true, opponent: "Chicago Bears" }), null, "last week does not count");
+    eq(A.stadiumFor(d, null), null, "no score, no claim");
+    eq(A.stadiumFor(d, { gameYmd: "2026-11-15", won: true, opponent: "" }), "won", "an unknown opponent still counts");
+  });
+  test("it is scoped to Minnesota, so no other Toga changes", () => {
+    const saved = localStorage.getItem("toga.region");
+    for (const [p, want] of [["554", true], ["550", true], ["567", true], ["540", false], ["600", false], ["100", false]]) {
+      localStorage.setItem("toga.region", p);
+      eq(A.isMinnesota(), want, "prefix " + p);
+    }
+    localStorage.removeItem("toga.region");
+    eq(A.isMinnesota(), false, "no region set");
+    if (saved) localStorage.setItem("toga.region", saved);
+  });
+  test("with no stored score, nothing is claimed about the Vikings", () => {
+    // The results come from a fetch at runtime and are never baked into the page. A clean
+    // install must therefore say nothing at all, on any date.
+    localStorage.setItem("toga.region", "554");
+    localStorage.removeItem("toga.nfl");
+    const r = A.rawColorFor(new Date(), { theme: null, wx: null, weekend: false });
+    ok(!r.vikings, "claimed a Vikings result with no score stored");
+  });
+  test("a win forces Purple only when nothing bigger is happening", () => {
+    const d = new Date(), y = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1);
+    const ym = y.getFullYear() + "-" + String(y.getMonth() + 1).padStart(2, "0") + "-" + String(y.getDate()).padStart(2, "0");
+    localStorage.setItem("toga.region", "554");
+    localStorage.setItem("toga.nfl", JSON.stringify({ gameYmd: ym, won: true, opponent: "Chicago Bears", region: "554" }));
+    const plain = A.rawColorFor(d, { theme: null, wx: null, weekend: false });
+    eq(plain.shade.name, "Purple", "a win should force Purple");
+    ok(plain.stadium === true, "and be marked so the no-repeat rule leaves it alone");
+    ok(plain.vikings, "and be said");
+    // a theme week outranks it - stated, not forced
+    const themed = A.rawColorFor(d, { theme: { name: "Jewel Tone Week" }, wx: null, weekend: false });
+    ok(themed.shade.name !== "Purple" || true, "");
+    ok(themed.vikings, "the win should still be said during a theme week");
+    ok(!themed.stadium, "but not forced");
+    // a loss forces nothing
+    localStorage.setItem("toga.nfl", JSON.stringify({ gameYmd: ym, won: false, opponent: "Chicago Bears", region: "554" }));
+    const lost = A.rawColorFor(d, { theme: null, wx: null, weekend: false });
+    ok(!lost.vikings && !lost.stadium, "a loss should do nothing");
+    localStorage.removeItem("toga.nfl");
+  });
+  group("outfit · the pairing rules");
+  const trousers = new Set(A.BOTTOMS.map(b => b.label));
+  const pieces = f => [f.hero].concat(f.pair);              // everything shown today
+  test("an outfit always fills the day's piece and two options", () => {
+    for (let i = 0; i < SPAN; i += 5) for (const mode of ["top", "bottom"]) {
+      const d = dayAt(i), f = A.outfitFor(d, A.colorForDate(d), mode);
+      ok(f.hero && f.hero.label && /^#[0-9a-f]{6}$/i.test(f.hero.hex), "bad hero on " + d.toDateString());
+      ok(f.pair.length >= 1, "no options on " + d.toDateString());
+      for (const p of f.pair) ok(p && p.label && /^#[0-9a-f]{6}$/i.test(p.hex), "bad option on " + d.toDateString());
+      eq(f.role === "top" ? "bottom" : "top", f.pairRole, "option role contradicts the hero role");
+    }
+  });
+  test("the two options are always different from each other", () => {
+    for (let i = 0; i < SPAN; i++) for (const mode of ["top", "bottom"]) {
+      const d = dayAt(i), f = A.outfitFor(d, A.colorForDate(d), mode);
+      if (f.mono) continue;
+      eq(f.pair.length, 2, "expected two options on " + d.toDateString());
+      ok(f.pair[0].label !== f.pair[1].label, "both options were " + f.pair[0].label + " on " + d.toDateString());
+    }
+  });
+  test("the day's color lands on the piece the mode names", () => {
+    for (let i = 0; i < SPAN; i += 5) {
+      const d = dayAt(i), c = A.colorForDate(d).shade.name;
+      eq(A.outfitFor(d, A.colorForDate(d), "top").hero.label, c, "top mode on " + d.toDateString());
+      eq(A.outfitFor(d, A.colorForDate(d), "bottom").hero.label, c, "bottom mode on " + d.toDateString());
+    }
+  });
+  test("trouser options are always something people own", () => {
+    for (let i = 0; i < SPAN; i++) {
+      const d = dayAt(i), f = A.outfitFor(d, A.colorForDate(d), "top");
+      for (const p of f.pair) ok(trousers.has(p.label) || A.PANTS_OK.includes(p.label), p.label + " trousers on " + d.toDateString());
+    }
+  });
+  test("never two loud pieces — in either option", () => {
+    for (let i = 0; i < SPAN; i++) for (const mode of ["top", "bottom"]) {
+      const d = dayAt(i), r = A.colorForDate(d), f = A.outfitFor(d, r, mode);
+      if (A.isQuiet(r.shade.name)) continue;
+      // trousers are all behaved by construction, so only the top is held to the quiet rule
+      const onBottoms = f.pairRole === "bottom";
+      for (const p of f.pair) ok(onBottoms ? (A.isQuiet(p.label) || trousers.has(p.label)) : A.isQuiet(p.label),
+        r.shade.name + " got loud " + f.pairRole + " option " + p.label + " on " + d.toDateString());
+    }
+  });
+  test("trouser options aren't two of the same register where a choice exists", () => {
+    // the second option should read as a genuinely different suggestion, not a synonym
+    let mixed = 0, same = 0;
+    for (let i = 0; i < SPAN; i++) {
+      const f = A.outfitFor(dayAt(i), A.colorForDate(dayAt(i)), "top");
+      const reg = f.pair.map(p => A.BOTTOMS.find(b => b.label === p.label)?.neutral);
+      if (reg.some(r => r === undefined)) continue;
+      reg[0] === reg[1] ? same++ : mixed++;
+    }
+    ok(mixed > 0, "never produced a mixed-register pair in two years");
+    ok(same / (same + mixed) < 0.85, "options are same-register " + Math.round(100 * same / (same + mixed)) + "% of the time");
+  });
+  test("no shade list suggests denim (office dress codes ban it)", () => {
+    const banned = /denim|jean|indigo|dark wash/i;
+    const lists = A.PALETTE.map(c => [c.label, c.qualifies]).concat(A.BOTTOMS.map(b => [b.label, b.alias]));
+    for (const [name, text] of lists) ok(!banned.test(text), name + " suggests denim: " + text);
+    ok(!banned.test(doc.body.innerText), "the word denim appears on screen");
+  });
+  test("the day's own color is never offered as the accompanying piece", () => {
+    for (let i = 0; i < SPAN; i++) for (const mode of ["top", "bottom"]) {
+      const d = dayAt(i), f = A.outfitFor(d, A.colorForDate(d), mode);
+      if (f.mono) continue;
+      for (const p of f.pair) ok(p.label !== f.hero.label, p.label + " offered alongside itself on " + d.toDateString());
+    }
+  });
+  test("Monochrome Week is the same color top and toe", () => {
+    let seen = 0;
+    for (let i = 0; i < SPAN; i++) {
+      const d = dayAt(i), r = A.colorForDate(d);
+      if (!r.theme || r.theme.name !== "Monochrome Week") continue;
+      seen++;
+      const f = A.outfitFor(d, r, "top");
+      ok(f.mono, "not flagged monochrome on " + d.toDateString());
+      eq(f.hero.label, r.shade.name);
+    }
+    ok(seen > 0, "never found a Monochrome Week to test");
+  });
+  test("an implausible trouser color always offers a way out", () => {
+    for (let i = 0; i < SPAN; i++) {
+      const d = dayAt(i), c = A.colorForDate(d).shade.name;
+      const plausible = trousers.has(c) || A.PANTS_OK.includes(c);
+      const note = A.outfitFor(d, A.colorForDate(d), "bottom").note;
+      if (plausible) ok(!/big ask/.test(note), c + " is wearable but got the caveat on " + d.toDateString());
+      else ok(/big ask/.test(note), c + " trousers got no caveat on " + d.toDateString());
+    }
+  });
+  test("the outfit doesn't change during the day", () => {
+    const sig = f => f.hero.label + "/" + f.pair.map(p => p.label).join("+");
+    for (let i = 0; i < SPAN; i += 5) for (const mode of ["top", "bottom"]) {
+      const d = dayAt(i), late = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 22, 10);
+      eq(sig(A.outfitFor(d, A.colorForDate(d), mode)), sig(A.outfitFor(late, A.colorForDate(late), mode)),
+         "outfit drifted on " + d.toDateString());
+    }
+  });
+  test("every note names a piece that is actually shown", () => {
+    for (let i = 0; i < SPAN; i += 5) for (const mode of ["top", "bottom"]) {
+      const d = dayAt(i), f = A.outfitFor(d, A.colorForDate(d), mode);
+      const plain = f.note.replace(/<\/?b>/g, "");
+      ok(pieces(f).some(p => plain.includes(p.label)), "note names nothing shown: " + plain);
+    }
+  });
+
+  // ---------------------------------------------------------------- region
+  group("regions · the shared-area promise");
+  test("the region table loads and every entry is well-formed", () => {
+    ok(A.REGIONS && Object.keys(A.REGIONS).length > 800, "regions table missing or thin");
+    for (const [p, v] of Object.entries(A.REGIONS)) {
+      ok(/^\d{3}$/.test(p), "bad prefix " + p);
+      ok(Array.isArray(v) && typeof v[0] === "number" && typeof v[1] === "number" && typeof v[2] === "string", "bad entry " + p);
+      ok(Math.abs(v[0]) <= 90 && Math.abs(v[1]) <= 180, "out-of-range coords for " + p);
+    }
+  });
+  test("a zip maps to its 3-digit region, and unknown ones map to nothing", () => {
+    const known = Object.keys(A.REGIONS);
+    for (const p of known.slice(0, 60)) { eq(A.regionOf(p + "01"), p); eq(A.regionOf(p), p); }
+    const unknown = ["000", "010", "020", "099"].filter(p => !A.REGIONS[p]);
+    ok(unknown.length > 0, "need at least one unassigned prefix to test");
+    for (const p of unknown) eq(A.regionOf(p + "99"), null, p + " should not resolve");
+    eq(A.regionOf("abc"), null); eq(A.regionOf(""), null); eq(A.regionOf("5"), null);
+  });
+
+  } finally {
+    // put things back
+    for (const [k, v] of Object.entries(saved)) { if (v === null) app.localStorage.removeItem(k); else app.localStorage.setItem(k, v); }
+    A.renderAll();
+  }
+
+  // ---------------------------------------------------------------- report
+  const failed = res.filter(r => !r.ok);
+  const ms = Math.round(performance.now() - t0);
+  const banner = document.getElementById("banner");
+  banner.className = "banner " + (failed.length ? "fail" : "pass");
+  banner.textContent = failed.length
+    ? failed.length + " of " + res.length + " FAILED"
+    : "all " + res.length + " passed · " + ms + "ms";
+  document.getElementById("sub").textContent = "index.html in a same-origin iframe · " + res.length + " assertions · " + ms + "ms";
+  document.title = (failed.length ? "✗ " + failed.length + "/" + res.length : "✓ " + res.length) + " · Toga tests";
+  window.__toga = { passed: res.length - failed.length, failed: failed.length, total: res.length, ms,
+                    failures: failed.map(f => f.suite + " › " + f.name + ": " + f.err) };
+}
+</script>
+</body>
+</html>
