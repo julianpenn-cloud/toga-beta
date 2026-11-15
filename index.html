@@ -964,6 +964,8 @@ async function refreshWeather() {
 
 // ---------------------------------------------------------------
 //  The stadium rule — a Minnesota easter egg. Purple the day after the Vikings win.
+//  Nothing here calls a sports API from the browser: the score arrives as nfl.json, written
+//  by .github/workflows/vikings.yml. There is a test forbidding a remote score URL in here.
 //  Scoped to Minnesota's zip prefixes (550-567) so every other Toga is exactly as it was,
 //  and it sits BELOW holidays and theme weeks: a holiday names its own colour, and a theme
 //  week promises one family for all five days. Either way the win still gets said.
@@ -987,39 +989,29 @@ function stadiumFor(date, nfl) {
 //  Is there a win to report today? Always reported; only *forced* when nothing outranks it.
 const stadiumNote = d => (isMinnesota() ? stadiumFor(d, loadJSON(NFL_KEY)) : null);
 
-//  Ask only about YESTERDAY, which is all the rule needs - so byes, the offseason and the
-//  playoffs need no special cases: no game yesterday, no egg. Runs on open, unlike the
-//  weather, because a Sunday result is wanted on Monday morning.
+//  The score is fetched by a scheduled job in the repository and left as a small file next
+//  to this page, so the page reads its OWN ORIGIN. That matters: a page cannot call a
+//  sports API directly (the public scoreboards answer curl but refuse a browser's request,
+//  because curl sends no Origin header and a page always does). Reading a same-origin file
+//  also means nothing about the reader leaves their device, and the service worker keeps a
+//  copy so it still works offline. No file means no easter egg, never an error.
+//  The file holds the MOST RECENT settled result; whether that was yesterday is decided
+//  here, by the rule above, so a missed run cannot produce a wrong colour, only a late one.
 async function refreshNFL() {
   if (!isMinnesota()) return;
   const now = new Date();
-  const prev = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
   const have = loadJSON(NFL_KEY);
-  if (have && have.gameYmd === ymd(prev) && have.region === getRegion()) return;   // settled
+  if (have && have.checked === ymd(now) && have.region === getRegion()) return;   // asked today
   try {
-    const url = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates="
-      + ymd(prev).replace(/-/g, "");
-    const j = await (await fetch(url)).json();
-    const events = j.events || [];
-    let sawUnfinished = false;
-    for (const e of events) {
-      const comp = (e.competitions || [])[0] || {};
-      const teams = comp.competitors || [];
-      const min = teams.filter(t => (t.team || {}).abbreviation === "MIN")[0];
-      if (!min) continue;
-      if (!(comp.status && comp.status.type && comp.status.type.completed)) { sawUnfinished = true; continue; }
-      const other = teams.filter(t => (t.team || {}).abbreviation !== "MIN")[0] || {};
-      localStorage.setItem(NFL_KEY, JSON.stringify({
-        gameYmd: ymd(prev), won: min.winner === true, region: getRegion(),
-        opponent: (other.team || {}).displayName || "", checked: ymd(now) }));
-      renderAll();
-      return;
-    }
-    // No settled Vikings game yesterday. Record it so we don't ask again all day - unless a
-    // game is still in progress, in which case leave it open and try again on the next open.
-    if (!sawUnfinished) localStorage.setItem(NFL_KEY, JSON.stringify({
-      gameYmd: ymd(prev), won: false, region: getRegion(), opponent: "", checked: ymd(now) }));
-  } catch { /* no score - no easter egg */ }
+    const res = await fetch("nfl.json");
+    if (!res.ok) return;
+    const j = await res.json();
+    if (!j || !j.gameYmd) return;
+    localStorage.setItem(NFL_KEY, JSON.stringify({
+      gameYmd: j.gameYmd, won: j.won === true, opponent: j.opponent || "",
+      region: getRegion(), checked: ymd(now) }));
+    renderAll();
+  } catch { /* no file, no easter egg */ }
 }
 
 // ---------------------------------------------------------------

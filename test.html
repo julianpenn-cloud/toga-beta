@@ -609,7 +609,15 @@ function run() {
     }
     ok(found > 0, "no theme week found in two years - this test proved nothing");
   });
-  group("the stadium rule · Purple the day after the Vikings win");
+  group("the stadium rule · Purple the day after the Vikings win");
+  test("the score is read from our own origin, never a remote API", () => {
+    //  A browser cannot call a public sports scoreboard: those endpoints answer curl,
+    //  which sends no Origin header, but refuse a page, which always sends one. A remote
+    //  URL here would look perfectly plausible and silently never work. So forbid it.
+    const src = [...doc.querySelectorAll("script")].map(s => s.textContent || "").join(" ");
+    ok(!/espn\.com/i.test(src), "a remote score URL is back in the page");
+    ok(src.indexOf("nfl.json") >= 0, "the page should read nfl.json from its own origin");
+  });
   test("only a win, and only whose game was yesterday", () => {
     const d = new Date(2026, 10, 16);                       // the Monday after
     eq(A.stadiumFor(d, { gameYmd: "2026-11-15", won: true, opponent: "Green Bay Packers" }), "beat the Packers");
