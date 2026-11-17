@@ -2,15 +2,20 @@ name: Vikings score
 
 # Writes nfl.json for the page to read. The fetch happens HERE, on a runner, because a
 # browser cannot call a public sports API (it answers curl, which sends no Origin header,
-# but refuses a page, which always sends one). Runs every three hours so a Sunday result is
-# sitting in the file well before Monday morning.
+# but refuses a page, which always sends one).
+#
+# Every 20 minutes from September to February, so a result is in the file soon after the
+# final whistle and the page can show tomorrow's Purple that same evening. Once a day the
+# rest of the year, which also keeps the schedule from being disabled for inactivity.
+# GitHub may start a scheduled run late, so "soon" means roughly within the hour.
 
 on:
   workflow_dispatch:
   push:
     branches: [main]
   schedule:
-    - cron: "0 */3 * * *"
+    - cron: "*/20 * * 1,2,9,10,11,12 *"
+    - cron: "23 10 * * *"
 
 permissions:
   contents: write
@@ -25,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Look up the latest settled Vikings result
+      - name: Look up the season's settled Vikings results
         run: python3 .github/scripts/vikings_score.py
 
       - name: Commit, if it changed
@@ -38,4 +43,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add nfl.json
           git commit -m "Vikings score: refresh nfl.json"
+          git pull -q --rebase origin main
           git push

@@ -1,6 +1,36 @@
 {
+  "wins": [
+    {
+      "ymd": "2026-09-13",
+      "opponent": "Green Bay Packers"
+    },
+    {
+      "ymd": "2026-09-20",
+      "opponent": "Chicago Bears"
+    },
+    {
+      "ymd": "2026-09-27",
+      "opponent": "Tampa Bay Buccaneers"
+    },
+    {
+      "ymd": "2026-10-04",
+      "opponent": "Miami Dolphins"
+    },
+    {
+      "ymd": "2026-10-11",
+      "opponent": "New Orleans Saints"
+    },
+    {
+      "ymd": "2026-10-25",
+      "opponent": "Indianapolis Colts"
+    },
+    {
+      "ymd": "2026-11-15",
+      "opponent": "Green Bay Packers"
+    }
+  ],
   "gameYmd": "2026-11-15",
   "won": true,
   "opponent": "Green Bay Packers",
-  "checked": "2026-11-15T22:33:50Z"
+  "checked": "2026-11-17T17:32:52Z"
 }

@@ -876,7 +876,7 @@ function verseFor(d, r) {
   const pick = arr => arr[roll % arr.length];
   const lines = [];
   if (r.holiday) lines.push(r.holiday.emoji + " " + r.holiday.name + " — " + r.holiday.note + ".");
-  else if (r.vikings) lines.push("🏈 The Vikings " + r.vikings + " yesterday. Purple, then.");
+  else if (r.vikings) lines.push("🏈 The Vikings " + r.vikings + " the day before." + (r.stadium ? " Purple, then." : ""));
   if (pool.length) lines.push(pick(pool));
   const tail = r.isFlannel ? pick(FLANNEL_LINES) : r.weekend ? pick(WEEKEND_LINES) : null;
   return { body: lines.join("\n"), tail };
@@ -973,18 +973,28 @@ async function refreshWeather() {
 //  The score comes from a key-less public scoreboard, locked into localStorage the same way
 //  the forecast is, and a failed fetch just means no easter egg. Never a dependency.
 // ---------------------------------------------------------------
-const NFL_KEY = "toga.nfl";                    // { gameYmd, won, opponent, region, checked }
+const NFL_KEY = "toga.nfl";                    // { wins:[{ymd, opponent}], region, at }
+const NFL_RECHECK_MS = 15 * 60 * 1000;         // look again this often while the page is in use
 const MN_PREFIX = /^5(5[0-9]|6[0-7])$/;        // Minnesota's zips run 550-567
 const isMinnesota = () => MN_PREFIX.test(getRegion() || "");
 const lastWord = s => String(s || "").trim().split(/\s+/).pop() || "";
 
-//  The rule, as a pure function: a win whose game was YESTERDAY means today. It takes the
-//  record as an argument so it can be tested without a network, a season, or storage.
+//  The wins in a record. The file carries the whole season ({ wins: [...] }); the older
+//  single-game shape ({ gameYmd, won, opponent }) is still read, as one win or none.
+function winsOf(nfl) {
+  if (!nfl) return [];
+  if (Array.isArray(nfl.wins)) return nfl.wins.filter(w => w && w.ymd).map(w => ({ ymd: w.ymd, opponent: w.opponent || "" }));
+  return nfl.won === true && nfl.gameYmd ? [{ ymd: nfl.gameYmd, opponent: nfl.opponent || "" }] : [];
+}
+//  The rule, as a pure function: a win on the day BEFORE a date makes that date Purple.
+//  It holds for any date, so tomorrow turns Purple the evening the game is settled, and
+//  every past day-after-a-win stays Purple in the month grid. It takes the record as an
+//  argument so it can be tested without a network, a season, or storage.
 function stadiumFor(date, nfl) {
-  if (!nfl || nfl.won !== true) return null;
-  const y = new Date(date.getFullYear(), date.getMonth(), date.getDate() - 1);
-  if (nfl.gameYmd !== ymd(y)) return null;
-  const opp = lastWord(nfl.opponent);
+  const y = ymd(new Date(date.getFullYear(), date.getMonth(), date.getDate() - 1));
+  const win = winsOf(nfl).filter(w => w.ymd === y)[0];
+  if (!win) return null;
+  const opp = lastWord(win.opponent);
   return opp ? "beat the " + opp : "won";
 }
 //  Store a result and redraw. The cache MUST be dropped first: the month is drawn before
@@ -1006,20 +1016,22 @@ const stadiumNote = d => (isMinnesota() ? stadiumFor(d, loadJSON(NFL_KEY)) : nul
 //  because curl sends no Origin header and a page always does). Reading a same-origin file
 //  also means nothing about the reader leaves their device, and the service worker keeps a
 //  copy so it still works offline. No file means no easter egg, never an error.
-//  The file holds the MOST RECENT settled result; whether that was yesterday is decided
-//  here, by the rule above, so a missed run cannot produce a wrong colour, only a late one.
+//  The file holds every win of the season; which days those colour is decided here, by the
+//  rule above, so a missed run cannot produce a wrong colour, only a late one.
+//  It is re-read every 15 minutes while the page is in use (and whenever the app is brought
+//  back to the front), so a game that ends this afternoon shows on tomorrow this evening.
 async function refreshNFL() {
   if (!isMinnesota()) return;
-  const now = new Date();
-  const have = loadJSON(NFL_KEY);
-  if (have && have.checked === ymd(now) && have.region === getRegion()) return;   // asked today
+  const have = loadJSON(NFL_KEY), region = getRegion();
+  if (have && have.region === region && Date.now() - (have.at || 0) < NFL_RECHECK_MS) return;
   try {
-    const res = await fetch("nfl.json");
+    const res = await fetch("nfl.json", { cache: "no-store" });
     if (!res.ok) return;
-    const j = await res.json();
-    if (!j || !j.gameYmd) return;
-    applyScore({ gameYmd: j.gameYmd, won: j.won === true, opponent: j.opponent || "",
-                 region: getRegion(), checked: ymd(now) });
+    const wins = winsOf(await res.json());
+    const rec = { wins, region, at: Date.now() };
+    const changed = !have || have.region !== region || JSON.stringify(winsOf(have)) !== JSON.stringify(wins);
+    if (changed) applyScore(rec);                       // new result: drop the cache and redraw
+    else localStorage.setItem(NFL_KEY, JSON.stringify(rec));
   } catch { /* no file, no easter egg */ }
 }
 
@@ -1516,11 +1528,13 @@ function colorForDate(date) {
     const { d, ctx, done } = chain[i];
     if (done) { prev = chain[i].r; continue; }
     let r = chain[i].r;
-    if (!r.holiday && !r.stadium && prev && !prev.holiday && !prev.stadium && prev.shade.name === r.shade.name) {
+    if (!r.holiday && !r.stadium && prev && !prev.holiday && prev.shade.name === r.shade.name) {
       const active = [...new Set(paletteFor(d, ctx.wx))];
       const at = active.findIndex(c => c.label === r.shade.name);
       if (active.length > 1 && at >= 0) {
+        const said = r.vikings;                // the bump changes the colour, not the news
         r = withColor(ctx, active[(at + (active.length > 4 ? 3 : 1)) % active.length], null);
+        if (said) r.vikings = said;
       }
     }
     colorCache.set(cacheKey(d), r);
@@ -1939,6 +1953,7 @@ renderAll();
 maybeWelcome(joined);
 refreshNFL();
 refreshWeather();
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshNFL(); });
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 
 // ---------------------------------------------------------------
@@ -1953,7 +1968,7 @@ window.TOGA = {
   // engine
   colorForDate, outfitFor, verseFor, byLabel, seasonFor, getMoon, daySeed, hash32,
   renderHero,   // renders ANY day's hero + banner + verse: the suite tests theme weeks with it
-  stadiumFor, isMinnesota, rawColorFor, applyScore,   // the stadium rule, as testable pieces
+  stadiumFor, winsOf, isMinnesota, rawColorFor, applyScore,   // the stadium rule, as testable pieces
   moodFromCode, regionOf, paintPage, contrastText, renderAll, hexRGB, isQuiet, easyLine,
   // sky — real astronomy, all computed locally
   skyFor, solarLongitude, solarDeclination, dayLengthHours, dayLengthDeltaMinutes,

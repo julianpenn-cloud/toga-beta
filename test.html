@@ -626,6 +626,41 @@ function run() {
     eq(A.stadiumFor(d, null), null, "no score, no claim");
     eq(A.stadiumFor(d, { gameYmd: "2026-11-15", won: true, opponent: "" }), "won", "an unknown opponent still counts");
   });
+  test("every win of the season colours its day after, past and future", () => {
+    const rec = { wins: [{ ymd: "2026-09-13", opponent: "Green Bay Packers" },
+                         { ymd: "2026-11-15", opponent: "Green Bay Packers" }] };
+    eq(A.stadiumFor(new Date(2026, 8, 14), rec), "beat the Packers", "a September win still counts in November");
+    eq(A.stadiumFor(new Date(2026, 10, 16), rec), "beat the Packers");
+    eq(A.stadiumFor(new Date(2026, 10, 15), rec), null, "game day itself is not the day after");
+    eq(A.stadiumFor(new Date(2026, 10, 17), rec), null, "two days after is not the day after");
+    eq(A.winsOf({ gameYmd: "2026-11-15", won: true, opponent: "X" }).length, 1, "the old one-game file is still read");
+    eq(A.winsOf({ gameYmd: "2026-11-15", won: false }).length, 0);
+  });
+  test("a win settled today shows on tomorrow this evening, and past days hold", () => {
+    const saved = localStorage.getItem("toga.region");
+    localStorage.setItem("toga.region", "554");
+    const iso = x => x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getDate()).padStart(2, "0");
+    //  Plain days only: a holiday or theme week outranks the rule by design.
+    const plainAfter = from => { for (let i = 0; i < 60; i++) {
+      const g = new Date(from.getFullYear(), from.getMonth(), from.getDate() + i);
+      const n = new Date(g.getFullYear(), g.getMonth(), g.getDate() + 1), r = A.colorForDate(n);
+      if (!r.holiday && !r.theme) return [g, n]; } };
+    localStorage.removeItem("toga.nfl");
+    A.applyScore({ wins: [], region: "554", at: Date.now() });
+    const [gameDay, dayAfter] = plainAfter(new Date());
+    const [oldGame, oldAfter] = plainAfter(new Date(2026, 8, 12));
+    A.applyScore({ wins: [{ ymd: iso(oldGame), opponent: "Chicago Bears" }, { ymd: iso(gameDay), opponent: "Chicago Bears" }],
+                   region: "554", at: Date.now() });
+    eq(A.colorForDate(dayAfter).shade.name, "Purple", "the day after a just-settled win");
+    eq(A.colorForDate(oldAfter).shade.name, "Purple", "a past day after a win holds its Purple");
+    const next = new Date(dayAfter.getFullYear(), dayAfter.getMonth(), dayAfter.getDate() + 1);
+    const nr = A.colorForDate(next);
+    ok(nr.holiday || nr.shade.name !== "Purple", "the day after a Purple win day should not repeat Purple");
+    localStorage.removeItem("toga.nfl");
+    A.applyScore({ wins: [], region: "554", at: Date.now() });
+    localStorage.removeItem("toga.nfl");
+    if (saved) localStorage.setItem("toga.region", saved); else localStorage.removeItem("toga.region");
+  });
   test("it is scoped to Minnesota, so no other Toga changes", () => {
     const saved = localStorage.getItem("toga.region");
     for (const [p, want] of [["554", true], ["550", true], ["567", true], ["540", false], ["600", false], ["100", false]]) {
