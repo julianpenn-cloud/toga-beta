@@ -307,11 +307,6 @@
                width: 100%; margin: 6px 0 0; }
   .hero-pair .garment { width: var(--g); height: var(--g); margin: 0; filter: none; }
   .hero-pair .garment.hero-garment { width: calc(var(--g) * 1.22); height: calc(var(--g) * 1.22); }
-  .hero-pair .pg { display: flex; flex-direction: column; align-items: center; }
-  .hero-pair .pg-garments { display: flex; align-items: flex-end; gap: 2px; }
-  .hero-pair .pg-label { font-family: Inter, sans-serif; font-size: 10.5px; font-weight: 600;
-                         letter-spacing: 0.7px; text-transform: uppercase; color: var(--muted);
-                         margin-top: 4px; }
   .swatch .defs { position: absolute; width: 0; height: 0; }
   .fit-shades { display: flex; flex-direction: column; gap: 9px; }
   .fit-shade { font-size: 12.5px; line-height: 1.35; }
@@ -346,7 +341,6 @@
   }
   .outfit .link-btn { margin-top: 2px; }
   /* Your drawer: chips you tick. The tick mark carries the state, not colour alone. */
-  .own-h { font-size: 10px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted); margin: 14px 0 7px; }
   .own-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip {
     display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 13px;
@@ -611,8 +605,7 @@
       <button class="nav-btn" id="drawerClose" aria-label="Close">×</button>
     </div>
     <p class="sheet-p">Tick the ones you have. If today's colour is not among them, Toga says so and leaves the rest to you. The day's colour never changes, so everyone still matches.</p>
-    <div class="own-h" id="ownTopsH">On top</div>
-    <div class="own-row" id="ownTops" role="group" aria-labelledby="ownTopsH"></div>
+    <div class="own-row" id="ownTops" role="group" aria-label="Tops you own"></div>
     <p class="sheet-fine">Stored only on this device. Like everything here: optional.</p>
   </div>
 </div>
@@ -1780,9 +1773,7 @@ const garmentSVG = (kind, hex, hero, pat) =>
 function renderOutfit(date, r) {
   r = r || colorForDate(date);
   const fit = outfitFor(r);
-  el("heroPair").innerHTML = `<div class="pg"><div class="pg-garments">`
-    + `${garmentSVG("top", fit.hero.hex, true, topPattern(date, fit.hero.hex, r.isFlannel))}</div>`
-    + `<div class="pg-label">On top</div></div>`;
+  el("heroPair").innerHTML = garmentSVG("top", fit.hero.hex, true, topPattern(date, fit.hero.hex, r.isFlannel));
   el("fitShades").innerHTML = `<div class="fit-shade"><span class="role">Any shade</span> <i>${fit.hero.alias}</i></div>`;
   el("fitNote").innerHTML = fit.note;
   el("fitEasy").textContent = easyLine(date);

@@ -580,7 +580,7 @@ function run() {
     eq(doc.querySelectorAll("#heroPair .garment").length, 1, "expected a single garment");
     eq(doc.querySelectorAll("#heroPair .or").length, 0, "there is nothing to choose between");
     ok(!doc.getElementById("modeBottom") && !doc.querySelector(".fit-btn"), "the colour-on-bottom toggle is still on the page");
-    eq([...doc.querySelectorAll("#heroPair .pg-label")].map(l => l.textContent).join("|"), "On top");
+    eq(doc.querySelectorAll("#heroPair .pg-label, #heroPair .pg").length, 0, "the garment still carries a caption");
     eq(doc.querySelector("#heroPair .hero-garment path").getAttribute("fill"), "url(#topPat)", "the top should wear the day's pattern");
     eq(doc.querySelectorAll("#topPat").length, 1, "exactly one pattern definition");
   });
