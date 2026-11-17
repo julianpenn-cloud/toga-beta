@@ -555,8 +555,7 @@ function run() {
     const worst = [];
     for (const c of A.PALETTE) {
       const surf = glow(c.hex);
-      for (const [sel, min, op] of [[".name", 3, 1], [".team", 4.5, 1], [".hex", 4.5, 0.92], [".eyebrow", 4.5, 0.92],
-                                    [".plaque-month", 4.5, 0.92], [".plaque-day", 4.5, 1]]) {
+      for (const [sel, min, op] of [[".name", 3, 1], [".team", 4.5, 1], [".hex", 4.5, 0.92], [".eyebrow", 4.5, 0.92]]) {
         const ink = app.getComputedStyle(sw.querySelector(sel)).color;
         const srgb = A.hexRGB(surf);
         const eff = "#" + A.hexRGB(toHex(ink))
@@ -851,12 +850,44 @@ function run() {
       ok(shirt.width >= 130, "the shirt renders at " + Math.round(shirt.width) + "px");
     }
   });
+  test("the date sits on glass cut from the day's own colour", () => {
+    const cr = (a, b) => { const L = h => { const [r, g, bl] = A.hexRGB(h).map(v => { v /= 255;
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+      return 0.2126*r + 0.7152*g + 0.0722*bl; };
+      const [x, y] = [L(a), L(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+    for (const c of A.PALETTE) {
+      const i = A.PALETTE.indexOf(c), d = new Date(2026, i % 12, (i % 27) + 1);
+      const svg = A.dateGlass(c.hex, d);
+      ok(svg.includes(c.hex), c.label + ": the day's own colour is missing from the glass");
+      // cut from the day's colour: every pane shares its hue, or stays neutral on a neutral day
+      const hue = x => { const [r, g, bl] = A.hexRGB(x).map(v => v / 255), mx = Math.max(r, g, bl), d = mx - Math.min(r, g, bl);
+        if (d < 0.04) return null;
+        return ((mx === r ? ((g - bl) / d) % 6 : mx === g ? (bl - r) / d + 2 : (r - g) / d + 4) * 60 + 360) % 360; };
+      const dayHue = hue(c.hex), panes = [...svg.matchAll(/fill="(#[0-9a-f]{6})"/gi)].map(x => x[1]);
+      ok(panes.length >= 3, c.label + ": the window is not tiled with panes");
+      for (const pane of panes) {
+        if (dayHue === null) { ok(hue(pane) === null || Math.min(...[Math.abs(hue(pane) - 0), Math.abs(hue(pane) - 360)]) < 40,
+          c.label + ": a neutral day got a coloured pane, " + pane); continue; }
+        const ph = hue(pane);
+        const off = ph === null ? 0 : Math.min(Math.abs(ph - dayHue), 360 - Math.abs(ph - dayHue));
+        ok(off <= 18, c.label + ": pane " + pane + " is " + Math.round(off) + " degrees off the day's hue");
+      }
+      const pale = (svg.match(/<rect x="77"[^>]*fill="(#[0-9a-f]{6})"/i) || [])[1];
+      const monthInk = (svg.match(/<text id="plaqueMonth"[^>]*fill="(#[0-9a-f]{6})"/i) || [])[1];
+      const dayInk = (svg.match(/<text id="plaqueDay"[^>]*fill="(#[0-9a-f]{6})"/i) || [])[1];
+      ok(pale && monthInk && dayInk, c.label + ": the window is missing its light or its lettering");
+      ok(cr(monthInk, pale) >= 4.5, c.label + ": the date is only " + cr(monthInk, pale).toFixed(2) + ":1 on its glass");
+      eq(dayInk, monthInk, c.label + ": the two lines of the inscription use different inks");
+      ok(svg.includes(">" + d.getDate() + "<"), c.label + ": no day numeral in the glass");
+      ok(svg.includes(A.MONTHS[d.getMonth()].toUpperCase()), c.label + ": no month in the glass");
+    }
+  });
   test("the date is on a plaque under the shirt, not printed on it", () => {
     A.renderHero(new Date(2026, 11, 25));
     const shirt = doc.getElementById("heroPair");
     ok(!/date-mark|<text/.test(shirt.innerHTML), "the shirt still carries something printed on it");
     const month = doc.getElementById("plaqueMonth"), day = doc.getElementById("plaqueDay");
-    eq(month.textContent, "December", "the plaque does not name the month");
+    eq(month.textContent, "DECEMBER", "the plaque does not name the month");
     eq(day.textContent, "25", "the plaque does not carry the day");
     // it sits below the shirt, and centred on it
     const sb = shirt.getBoundingClientRect(), pb = doc.querySelector(".plaque").getBoundingClientRect();
@@ -864,10 +895,10 @@ function run() {
     near(pb.left + pb.width / 2, sb.left + sb.width / 2, 3, "the plaque is not centred on the shirt");
     // and it follows whichever day is being shown
     A.renderHero(new Date(2026, 0, 5));
-    eq(doc.getElementById("plaqueMonth").textContent, "January", "the month did not follow the day");
+    eq(doc.getElementById("plaqueMonth").textContent, "JANUARY", "the month did not follow the day");
     eq(doc.getElementById("plaqueDay").textContent, "5");
     A.renderHero(new Date(2026, 8, 21));
-    eq(doc.getElementById("plaqueMonth").textContent, "September");
+    eq(doc.getElementById("plaqueMonth").textContent, "SEPTEMBER");
   });
   const hueOf = hex => { const [r, g, b] = A.hexRGB(hex).map(v => v / 255), mx = Math.max(r, g, b), d = mx - Math.min(r, g, b);
     if (d < 0.04) return null;
