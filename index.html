@@ -339,17 +339,6 @@
     border: 1px solid var(--line); border-left: 3px solid var(--gold);
     border-radius: 12px; padding: 12px 15px 13px;
   }
-  .outfit .link-btn { margin-top: 2px; }
-  /* Your drawer: chips you tick. The tick mark carries the state, not colour alone. */
-  .own-row { display: flex; flex-wrap: wrap; gap: 6px; }
-  .chip {
-    display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 13px;
-    border-radius: 999px; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--ink);
-    background: var(--card); border: 1px solid var(--line); cursor: pointer;
-  }
-  .chip i { width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(34,48,31,0.3); }
-  .chip[aria-pressed="true"] { border-color: var(--green); box-shadow: inset 0 0 0 1.5px var(--green); background: var(--paper); }
-  .chip[aria-pressed="true"]::after { content: "✓"; color: var(--green); font-weight: 700; }
   .fit-note { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(var(--day-rgb), 0.22); font-size: 12.5px; }
   .fit-note b { font-weight: 700; }
   .fit-easy { display: block; margin-top: 6px; font-size: 11.5px; color: var(--muted); font-style: italic; }
@@ -537,7 +526,6 @@
         <div class="fit-shades" id="fitShades"></div>
         <div class="fit-note" id="fitNote"></div>
         <div class="fit-easy" id="fitEasy"></div>
-        <button class="link-btn" id="drawerBtn">Which tops do you own?</button>
       </div>
       <div class="panel">
         <h2>This week</h2>
@@ -595,19 +583,6 @@
     <div class="fine colophon">Designed by Julian Penn in Minnesota, USA</div>
     <div class="fine beta-mark">beta build · the live one is <a href="https://julianpenn-cloud.github.io/toga/">toga</a></div>
   </footer>
-</div>
-
-<!-- Your drawer: the tops this person owns. Never changes the day's colour. -->
-<div class="sheet" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
-  <div class="sheet-card">
-    <div class="sheet-head">
-      <h3 id="drawerTitle">The tops you own</h3>
-      <button class="nav-btn" id="drawerClose" aria-label="Close">×</button>
-    </div>
-    <p class="sheet-p">Tick the ones you have. If today's colour is not among them, Toga says so and leaves the rest to you. The day's colour never changes, so everyone still matches.</p>
-    <div class="own-row" id="ownTops" role="group" aria-label="Tops you own"></div>
-    <p class="sheet-fine">Stored only on this device. Like everything here: optional.</p>
-  </div>
 </div>
 
 <!-- Settings sheet: your region -->
@@ -1535,24 +1510,17 @@ const tomorrowOf = date => new Date(date.getFullYear(), date.getMonth(), date.ge
 //  Toga names the day's colour and puts it on a top. It deliberately stops there: no trouser
 //  list, no second garment, no second guess. The point is that one colour drops into an
 //  outfit somebody already owns — and that the people who need this most are the ones
-//  working around a uniform, so the card says an accent of it is plenty.
-//
-//  "Your drawer" is the one thing kept from the outfit feature: tick the tops you own and
-//  the card stops assuming you have today's colour. It never changes the colour itself, so
-//  everyone in a group still matches.
+//  working around a uniform, so the card asks for an accent of the colour and hands the rest
+//  back. No wardrobe to configure: the app cannot know what is in anyone's closet, and asking
+//  turned out to be more machinery than the answer was worth.
 // ---------------------------------------------------------------
-const OWN_KEY = "toga.own";     // { tops:[labels] } — an empty list means "you own anything"
-function getOwn() { const o = loadJSON(OWN_KEY) || {}; return { tops: o.tops || [] }; }
-
-function outfitFor(r, own = getOwn()) {
+function outfitFor(r) {
   const hero = { label: r.shade.name, hex: r.shade.hex, alias: r.family.qualifies };
+  const low = hero.label.toLowerCase();
   // Monochrome Week's whole point is one color top to toe — so honour it literally.
-  if (r.theme && r.theme.name === "Monochrome Week")
-    return { hero, mono: true, note: "Monochrome Week — <b>" + hero.label + "</b> head to toe. Any shade of it." };
-  const low = hero.label.toLowerCase(), noTop = own.tops.length && !own.tops.includes(hero.label);
-  return { hero, mono: false, note: noTop
-    ? "No " + low + " top in the drawer? An accent of it is plenty."
-    : "An accent of " + low + " is plenty. The rest of the outfit is yours." };
+  return (r.theme && r.theme.name === "Monochrome Week")
+    ? { hero, mono: true, note: "Monochrome Week — <b>" + hero.label + "</b> head to toe. Any shade of it." }
+    : { hero, mono: false, note: "An accent of " + low + " is plenty. The rest of the outfit is yours." };
 }
 
 // ---------------------------------------------------------------
@@ -1779,28 +1747,6 @@ function renderOutfit(date, r) {
   el("fitEasy").textContent = easyLine(date);
 }
 
-//  Your drawer. Chips are toggled in place (not re-rendered) so keyboard focus stays put.
-function openDrawer() {
-  const own = getOwn();
-  const chips = (kind, list) => list.map(c => `<button class="chip" data-kind="${kind}" data-label="${c.label}" `
-    + `aria-pressed="${own[kind].includes(c.label)}"><i style="background:${c.hex}"></i>${c.label}</button>`).join("");
-  el("ownTops").innerHTML = chips("tops", PALETTE);
-  el("drawer").classList.add("open");
-  el("drawerClose").focus();
-}
-function closeDrawer() {
-  if (!el("drawer").classList.contains("open")) return;
-  el("drawer").classList.remove("open");
-  el("drawerBtn").focus();
-}
-function toggleOwn(chip) {
-  const own = getOwn(), list = own[chip.dataset.kind], at = list.indexOf(chip.dataset.label);
-  at < 0 ? list.push(chip.dataset.label) : list.splice(at, 1);
-  localStorage.setItem(OWN_KEY, JSON.stringify(own));
-  chip.setAttribute("aria-pressed", String(at < 0));
-  renderAll();
-}
-
 function renderWeek(date) {
   const monday = mondayOf(date), week = el("week");
   week.innerHTML = "";
@@ -1895,11 +1841,9 @@ function renderAll() {
 el("todayBtn").onclick = () => { selected = new Date(); view = new Date(selected.getFullYear(), selected.getMonth(), 1); renderAll(); };
 el("prevMonth").onclick = () => { view.setMonth(view.getMonth() - 1); renderAll(); };
 el("nextMonth").onclick = () => { view.setMonth(view.getMonth() + 1); renderAll(); };
-el("drawerBtn").onclick = openDrawer;
-el("drawerClose").onclick = closeDrawer;
-el("drawer").onclick = e => { const chip = e.target.closest(".chip"); if (chip) toggleOwn(chip); else if (e.target === el("drawer")) closeDrawer(); };
-document.addEventListener("keydown", e => { if (e.key === "Escape") { closeDrawer(); closeSettings(); } });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeSettings(); });
 localStorage.removeItem("toga.mode");          // the color-on-bottom toggle is gone
+localStorage.removeItem("toga.own");           // and so is the wardrobe
 el("settingsBtn").onclick = openSettings;
 el("settingsClose").onclick = closeSettings;
 el("settings").onclick = e => { if (e.target === el("settings")) closeSettings(); };
@@ -1932,7 +1876,7 @@ window.TOGA = {
   renderHero,   // renders ANY day's hero + banner + verse: the suite tests theme weeks with it
   stadiumFor, winsOf, isMinnesota, rawColorFor, applyScore,   // the stadium rule, as testable pieces
   moodFromCode, regionOf, paintPage, contrastText, renderAll, hexRGB, easyLine,
-  shadesOf, topPattern, TOP_KINDS, getOwn,   // the patterned top and the drawer
+  shadesOf, topPattern, TOP_KINDS,           // the patterned top
   // sky — real astronomy, all computed locally
   skyFor, solarLongitude, solarDeclination, dayLengthHours, dayLengthDeltaMinutes,
   solarNoonAltitude, nextSeasonMark, meteorShower, dayOfYear, daysInYear,

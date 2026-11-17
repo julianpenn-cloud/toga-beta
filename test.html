@@ -74,7 +74,7 @@ function run() {
 
   // don't disturb whatever the reader had stored
   const saved = {};
-  for (const k of ["toga.own", "toga.region", "toga.wx", "toga.seen"]) saved[k] = app.localStorage.getItem(k);
+  for (const k of ["toga.region", "toga.wx", "toga.seen"]) saved[k] = app.localStorage.getItem(k);
 
   const DAY = (y, m, d) => new Date(y, m, d);
   const SPAN = 730;
@@ -588,11 +588,10 @@ function run() {
     // Measured on a phone: six of eight controls were under 44px and three showed no focus
     // indicator at all. Sizes are checked on the real elements; the ring is checked as a
     // rule (and live, when this frame can take focus) and for contrast on every paper.
-    const sheets = ["settings", "drawer"].map(id => doc.getElementById(id));
-    doc.getElementById("drawerBtn").click();
+    const sheets = ["settings"].map(id => doc.getElementById(id));
     sheets.forEach(sh => sh.classList.add("open"));
     const controls = [...doc.querySelectorAll("button, a[href], summary, input")].filter(e => e.getClientRects().length);
-    ok(controls.length >= 25, "expected the page's controls plus the drawer's chips, found " + controls.length);
+    ok(controls.length >= 8, "expected the page's controls, found " + controls.length);
     const bad = [];
     app.focus();
     for (const e of controls) {
@@ -762,9 +761,8 @@ function run() {
     if (saved) localStorage.setItem("toga.region", saved); else localStorage.removeItem("toga.region");
   });
   group("outfit · one colour, worn your way");
-  const ANY = { tops: [] };
   const hexOK = h => /^#[0-9a-f]{6}$/i.test(h || "");
-  const fitOn = (i, own) => { const d = dayAt(i), r = A.colorForDate(d); return [A.outfitFor(r, own || ANY), r, d]; };
+  const fitOn = i => { const d = dayAt(i), r = A.colorForDate(d); return [A.outfitFor(r), r, d]; };
   test("the day's colour goes on the top, and nothing is suggested below it", () => {
     for (let i = 0; i < SPAN; i++) {
       const [f, r, d] = fitOn(i);
@@ -810,25 +808,20 @@ function run() {
   test("the card never changes during the day", () => {
     for (let i = 0; i < SPAN; i += 5) {
       const [f, , d] = fitOn(i), late = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 22, 10);
-      eq(A.outfitFor(A.colorForDate(late), ANY).note, f.note, "the card drifted on " + d.toDateString());
+      eq(A.outfitFor(A.colorForDate(late)).note, f.note, "the card drifted on " + d.toDateString());
     }
   });
-  test("the drawer is read from this device, and only changes the wording", () => {
-    // With the bottom half gone the drawer's only job is to know whether today's colour is
-    // one this person owns. It can never change the colour, or name a second piece.
-    let i = 0; while (fitOn(i)[0].mono) i++;
-    const [f, r] = fitOn(i), other = A.PALETTE.find(c => c.label !== r.shade.name).label;
-    const [mine] = fitOn(i, { tops: [r.shade.name] }), [notMine] = fitOn(i, { tops: [other] });
-    eq(mine.hero.label, f.hero.label, "the drawer changed the colour");
-    eq(notMine.hero.label, f.hero.label, "the drawer changed the colour");
-    ok(/accent/i.test(mine.note) && !/drawer/i.test(mine.note), "owning it should read plainly: " + mine.note);
-    ok(/drawer/i.test(notMine.note), "not owning it should say so: " + notMine.note);
-    const keep = localStorage.getItem("toga.own");
-    localStorage.removeItem("toga.own");
-    eq(A.outfitFor(r).note, mine.note, "an empty drawer should read as the plain line");
-    localStorage.setItem("toga.own", JSON.stringify({ tops: ["Wine"] }));
-    eq(A.getOwn().tops.join(), "Wine", "the drawer is not read back from the device");
-    if (keep === null) localStorage.removeItem("toga.own"); else localStorage.setItem("toga.own", keep);
+  test("nothing about wardrobes is left on the page", () => {
+    // The drawer is gone: no sheet, no link, no chips, and no second version of the card's
+    // line that depended on it. outfitFor reads no storage at all now.
+    ok(!A.getOwn && !A.OWN_KEY, "the drawer is still published to the test surface");
+    eq(doc.getElementById("drawer"), null, "the drawer sheet is still in the page");
+    ok(!/tops you own|what you own|which tops/i.test(doc.body.innerText), "the page still asks about a wardrobe");
+    ok(!doc.querySelector("[data-kind], #drawerBtn, #drawerTitle"), "a piece of the drawer is still on the page");
+    for (const c of A.PALETTE) {
+      const note = A.outfitFor({ shade: { name: c.label, hex: c.hex }, family: c, theme: null }).note;
+      ok(/accent/i.test(note) && /yours/i.test(note), c.label + " lost its accent line: " + note);
+    }
   });
 
   group("outfit · the patterned top");
