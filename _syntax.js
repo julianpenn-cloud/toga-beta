@@ -1,0 +1,1294 @@
+
+// ===============================================================
+//  TOGA — a color a day, chosen by the season (and, if you like, the weather)
+//
+//  How a day gets its color, in order:
+//    1. Holiday? that color wins.
+//    2. Theme week? pick from the theme's colors only.
+//    3. Otherwise: seasonal drift × weather nudge, no two days alike.
+//  Then, separately, a cold-season roll may add a flannel *note* to the day —
+//  "and if you've got a flannel, today's the day." A texture, not a color.
+//  Every day gets a color, weekends included. Deterministic from the date
+//  (+ locked forecast), so every phone agrees.
+// ===============================================================
+
+// ---------------------------------------------------------------
+//  Palette. `curve` = how much a color "wants" each month, Jan..Dec (0 = off).
+//  Weights drift smoothly between months, so the palette breathes with the year.
+//  temp: warm/cool/neutral · tone: light/dark/mid (for the weather mood).
+// ---------------------------------------------------------------
+const PALETTE = [
+  //                                                          J  F  M  A  M  J  J  A  S  O  N  D
+  { label:"White",    hex:"#F1EFEA", team:"The Marble Hall",  curve:[4, 4, 3, 3, 3, 3, 3, 3, 2, 2, 3, 4], temp:"neutral", tone:"light", qualifies:"cream, ivory, ecru, off-white, light grey" },
+  { label:"Grey",     hex:"#8A8D8F", team:"The Stoics",       curve:[4, 4, 3, 2, 2, 1, 1, 1, 2, 3, 4, 4], temp:"cool",    tone:"mid",   qualifies:"charcoal, slate, silver, heather, stone, dove" },
+  { label:"Black",    hex:"#2E2E2E", team:"The Night Watch",  curve:[4, 3, 3, 2, 1, 1, 1, 1, 2, 3, 3, 4], temp:"neutral", tone:"dark",  qualifies:"charcoal, graphite, onyx, dark grey" },
+  { label:"Brown",    hex:"#7A5230", team:"The Terra Firma",  curve:[3, 3, 2, 1, 1, 1, 1, 1, 3, 4, 4, 3], temp:"warm",    tone:"dark",  qualifies:"tan, camel, khaki, chocolate, taupe, chestnut" },
+  { label:"Blue",     hex:"#3A6FA8", team:"The Tide",         curve:[2, 2, 3, 3, 3, 4, 4, 4, 3, 2, 2, 2], temp:"cool",    tone:"mid",   qualifies:"navy, sky, steel, azure, powder, cobalt" },
+  { label:"Red",      hex:"#C4453A", team:"The Ember",        curve:[2, 3, 2, 2, 2, 3, 3, 3, 3, 3, 2, 3], temp:"warm",    tone:"mid",   qualifies:"brick, scarlet, cherry, crimson, tomato" },
+  { label:"Green",    hex:"#4E8A5A", team:"The Laurel",       curve:[1, 1, 2, 3, 4, 3, 3, 3, 3, 3, 2, 2], temp:"cool",    tone:"mid",   qualifies:"olive, forest, emerald, moss, pine, kelly" },
+  { label:"Purple",   hex:"#8E63C4", team:"The Heather",      curve:[2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 2, 2], temp:"cool",    tone:"mid",   qualifies:"lilac, lavender, orchid, mauve, violet, grape" },
+  { label:"Yellow",   hex:"#E3B23C", team:"The Sunrise Club", curve:[0, 0, 1, 2, 3, 3, 3, 3, 1, 0, 0, 0], temp:"warm",    tone:"light", qualifies:"mustard, gold, butter, lemon, marigold, honey" },
+  // --- the new ones: seasonal by nature, so no single day is crowded ---
+  { label:"Teal",     hex:"#2E8B8B", team:"The Harbor",       curve:[0, 0, 1, 2, 3, 3, 3, 3, 2, 1, 0, 0], temp:"cool",    tone:"mid",   qualifies:"teal, turquoise, aqua, seafoam, peacock, lagoon" },
+  { label:"Coral",    hex:"#E07A5F", team:"The Reef",         curve:[0, 0, 0, 1, 2, 3, 3, 3, 1, 0, 0, 0], temp:"warm",    tone:"light", qualifies:"coral, salmon, peach, apricot, melon, terracotta" },
+  { label:"Sage",     hex:"#9CAF88", team:"The Herb Garden",  curve:[0, 0, 2, 3, 3, 2, 1, 1, 1, 0, 0, 0], temp:"cool",    tone:"light", qualifies:"sage, eucalyptus, celadon, mint, pistachio, moss" },
+  { label:"Burgundy", hex:"#722F37", team:"The Vintners",     curve:[2, 2, 1, 0, 0, 0, 0, 0, 2, 3, 3, 3], temp:"warm",    tone:"dark",  qualifies:"burgundy, wine, maroon, oxblood, merlot, garnet" },
+  { label:"Plum",     hex:"#5B3A6B", team:"The Twilight",     curve:[3, 3, 2, 1, 0, 0, 0, 0, 0, 1, 2, 3], temp:"cool",    tone:"dark",  qualifies:"plum, eggplant, aubergine, mulberry, damson, fig" },
+  { label:"Pink",     hex:"#E88AA0", team:"The Rose Garden",  curve:[0, 1, 2, 3, 3, 2, 2, 2, 1, 0, 0, 0], temp:"warm",    tone:"light", qualifies:"blush, rose, magenta, raspberry, petal, dusty rose" },
+  { label:"Orange",   hex:"#E0822E", team:"The Harvest",       curve:[0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 2, 1], temp:"warm",    tone:"mid",   qualifies:"burnt orange, rust, pumpkin, amber, copper, peach" },
+];
+const byLabel = l => PALETTE.find(c => c.label === l);
+
+//  A color's weight on a given date: linear blend between this month's and next month's
+//  curve value by how far through the month we are. Smooth drift, no hard seasonal cliffs.
+function weightOn(c, d) {
+  const m = d.getMonth();
+  const days = new Date(d.getFullYear(), m + 1, 0).getDate();
+  const t = (d.getDate() - 1) / days;
+  return c.curve[m] * (1 - t) + c.curve[(m + 1) % 12] * t;
+}
+
+// ---------------------------------------------------------------
+//  Themed weeks — a handful a year. That week the pick is from the theme's
+//  colors only. Anchored to a date; whichever Mon–Fri week contains it is the
+//  theme week, so it works every year.
+// ---------------------------------------------------------------
+const THEME_WEEKS = [
+  { name:"Jewel Tone Week",  emoji:"💎", anchor:[1,21],  colors:["Purple","Green","Blue","Burgundy","Plum"], note:"Deep and saturated — emerald, sapphire, garnet, amethyst" },
+  { name:"Neutrals Week",    emoji:"🪨", anchor:[3,11],  colors:["Grey","Brown","White","Black"],           note:"Calm and quiet — let texture do the talking" },
+  { name:"Fresh Start Week", emoji:"🌱", anchor:[5,6],   colors:["Sage","Green","Yellow","White","Teal","Pink"], note:"Spring on your sleeve — light, bright, awake" },
+  { name:"Summer Sky Week",  emoji:"🌤️", anchor:[7,15],  colors:["Blue","White","Yellow","Teal","Coral"],   note:"Sky, cloud, sun, sea — nothing heavier" },
+  { name:"Earth Tone Week",  emoji:"🍁", anchor:[9,23],  colors:["Brown","Green","Burgundy","Grey","Orange"], note:"Harvest colors — warm, grounded, layered" },
+  { name:"Monochrome Week",  emoji:"◐",  anchor:[11,11], colors:["Black","Grey","White"],                   note:"One color head to toe — any shade, all the way down" },
+];
+function mondayOf(d) {
+  const m = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  m.setDate(m.getDate() - ((m.getDay() + 6) % 7));
+  return m;
+}
+function themeWeekFor(d) {
+  const mon = mondayOf(d).getTime();
+  return THEME_WEEKS.find(t => mondayOf(new Date(d.getFullYear(), t.anchor[0] - 1, t.anchor[1])).getTime() === mon) || null;
+}
+
+// ---------------------------------------------------------------
+//  Seasons — eight named stretches (so "late autumn" ≠ "early autumn"),
+//  plus the four coarse seasons that drive the stained-glass tint.
+// ---------------------------------------------------------------
+const SEASONS = [ // [startMonth, startDay, name, emoji]
+  [12,21, "Deep Winter",   "❄️"],
+  [ 2, 5, "Late Winter",   "🌬️"],
+  [ 3,20, "Early Spring",  "🌱"],
+  [ 5, 1, "Late Spring",   "🌷"],
+  [ 6,21, "High Summer",   "☀️"],
+  [ 8, 8, "Late Summer",   "🌾"],
+  [ 9,22, "Early Autumn",  "🍂"],
+  [11, 5, "Late Autumn",   "🍁"],
+];
+function seasonFor(d) {
+  const y = d.getFullYear(), t = d.getTime();
+  // Deep Winter wraps the year: Dec 21 → Feb 4
+  let cur = SEASONS[0];
+  for (const s of SEASONS) if (new Date(y, s[0] - 1, s[1]).getTime() <= t) cur = s;
+  return { name: cur[2], emoji: cur[3] };
+}
+function seasonOf(d) { // coarse, for CSS tint
+  const m = d.getMonth() + 1;
+  return m <= 2 || m === 12 ? "winter" : m <= 5 ? "spring" : m <= 8 ? "summer" : "autumn";
+}
+// ---------------------------------------------------------------
+//  Verses — one short poem per day, in place of an explanation.
+//  Hand-written, keyed by color × season, with a few variants each so a color
+//  doesn't always say the same thing. Picked deterministically by date, so every
+//  phone reads the same line. Nature-forward, an occasional wink.
+//  Flannel, holidays, and theme weeks add or swap a line.
+// ---------------------------------------------------------------
+const VERSES = {
+  Purple: {
+    winter: ["Purple. The color of the last light\nbefore the streetlamps take over.", "Frost on the window, plum in the sky.\nWear a little of the evening."],
+    spring: ["Crocus. Lilac. The first purple\nis always a surprise, even to the ground.", "Purple today — the shade of things\nthat bloomed before they were asked."],
+    summer: ["Thunderheads at six o'clock, violet at the edges.\nSomething's coming. Dress for it.", "Lavender in the heat. Purple,\nthe cool side of a warm day."],
+    autumn: ["Asters along the fence, the last ones.\nPurple, and unhurried about it.", "Purple. The sky does this at dusk\nwhen it thinks nobody's looking."],
+  },
+  Red: {
+    winter: ["Red against the snow. A cardinal\nknows exactly what it's doing.", "The color of the one warm thing\nin a cold room. Be that."],
+    spring: ["Tulips, all at once, as if on a signal.\nRed today. Go ahead and be obvious.", "Red. The robin's chest, the first\nloud thing the year has said."],
+    summer: ["Ripe. That's the whole note.\nRed, and no apology.", "Red — the color the sun turns\nright before it lets go of the day."],
+    autumn: ["The maples went first, as they always do.\nRed today. Burn a little.", "Red. Whatever the year did,\nit's saying it out loud now."],
+  },
+  Blue: {
+    winter: ["The lake has gone to glass.\nBlue, the color of holding still.", "Blue shadow on white snow —\nthe coldest color, and the calmest."],
+    spring: ["Sky, finally, after all that grey.\nBlue today. Look up more than usual.", "Blue. The color of the first day\nyou leave the coat at home."],
+    summer: ["Lake blue. Sky blue. The line between them\ngone soft in the heat.", "Blue today — deep water,\nand the good sense to float."],
+    autumn: ["A high, thin, cold blue.\nThe sky's version of a clean desk.", "Blue. The geese know the way;\nyou only have to pick a shirt."],
+  },
+  Green: {
+    winter: ["Green. The pines are the only ones\nstill saying yes.", "Under the snow, everything green\nis waiting. Wear the wait."],
+    spring: ["Green today — the new kind,\nthe kind that hasn't learned to be careful.", "Every leaf is a small announcement.\nGreen. Make yours."],
+    summer: ["Full canopy. Shade you can lean on.\nGreen, and generous with it.", "Green today. The color the whole world\nsettles into when it's sure of itself."],
+    autumn: ["The last green holds the fence line\nwhile everything else lets go.", "Green. Evergreen, actually —\nthe one that doesn't take the season personally."],
+  },
+  Brown: {
+    winter: ["Bare branches, dark earth, a cup of something.\nBrown. The color of enough.", "Brown today. The ground holds everything up\nand asks for nothing."],
+    spring: ["Mud season. Brown, honestly.\nThe most alive color there is right now.", "Brown — the soil before the seed.\nAll the potential, none of the noise."],
+    summer: ["Bark, dust, the warm side of a fence.\nBrown, sun-baked and steady.", "Brown today. Ground yourself;\nthe sky's got enough going on."],
+    autumn: ["Acorns, oak leaves, the good dirt.\nBrown, and exactly in season.", "Brown. The whole year\nsettling into the earth for a while."],
+  },
+  Grey: {
+    winter: ["Grey. The sky and the lake agreed\nto match today. So can you.", "A soft grey morning. Nothing is asking\nanything of you. Dress like it."],
+    spring: ["Grey today — rain-light, gentle.\nThe color that lets the green show off.", "Grey. Nobody will notice,\nwhich is the point."],
+    summer: ["Fog off the water, gone by nine.\nGrey, cool, and briefly mysterious.", "Grey today. A rest note\nin a loud season."],
+    autumn: ["Stone, slate, a low sky.\nGrey — the color of paying attention.", "Grey. Let the leaves do the talking\nfor once."],
+  },
+  White: {
+    winter: ["White. The whole world went quiet\nand asked you to match.", "Fresh snow, no footprints yet.\nWhite today. Start clean."],
+    spring: ["Apple blossom. White, briefly,\nand all the better for it.", "White — the color of a page\nnobody's written on yet."],
+    summer: ["High clouds, white sails, linen.\nWhite: the coolest thing in the sun.", "White today. Reflect a little;\nthe sun's doing the rest."],
+    autumn: ["First frost on the grass.\nWhite, quiet, gone by noon.", "White. The color of breath\non the first cold morning."],
+  },
+  Black: {
+    winter: ["Black. Long nights, good coats,\nand nothing to prove.", "The dark comes early and stays.\nBlack today — meet it well-dressed."],
+    spring: ["Black today. Wet earth, crow on the wire.\nThe season's sharpest contrast.", "Black — the color that makes\nevery other color look like spring."],
+    summer: ["Black in July. Bold. Cool shade,\nwarm pavement. Own it.", "Black today. The color of the pause\nbetween the fireworks."],
+    autumn: ["Bare branches on a white sky.\nBlack, elegant, inevitable.", "Black. The color the year\nwears to the end of the party."],
+  },
+  Yellow: {
+    winter: ["Yellow. A lit window on a dark street.\nBe the one that's home.", "Yellow today — out of season,\nand exactly what the season needs."],
+    spring: ["Forsythia, daffodil, the first warm hour.\nYellow. The year said go.", "Yellow today. The color of\nfinally."],
+    summer: ["Yellow. High noon, no shadow,\nnothing to hide.", "Sunflowers face the light all day.\nYellow — do the same."],
+    autumn: ["Aspens, gold and shaking.\nYellow, before it lets go.", "Yellow today. The last warm light\nbefore the year turns down the lamp."],
+  },
+  Teal: {
+    winter: ["Teal. The color under the ice,\nwhere the water keeps moving.", "Teal today — cold water, deep enough\nto have a second color."],
+    spring: ["Teal. The lake, thawed, catching its breath.\nSomewhere between blue and alive.", "Teal today. The color the sky makes\nwhen it leans toward the trees."],
+    summer: ["Teal — deep water, warm air.\nThe color of the good swimming hole.", "Teal today. Where the lake\nstops being blue and starts being cool."],
+    autumn: ["Teal. The last warm water,\nthe first cold light.", "Teal today — a color that hasn't decided\nwhich season it's in. Same."],
+  },
+  Coral: {
+    winter: ["Coral. Sunrise over snow,\nfor about four minutes. Catch it.", "Coral today — the warmest thing\nin the coldest month."],
+    spring: ["Coral. Tulips, sunsets, cheeks.\nThe color of blood coming back.", "Coral today. Spring's version\nof a wink."],
+    summer: ["Coral — the sky at the hour\nwhen everyone puts down their phone.", "Coral today. Warm, bright,\nand not the least bit sorry."],
+    autumn: ["Coral. The leaves went orange,\nthen thought better of it.", "Coral today — the soft end\nof a bright season."],
+  },
+  Sage: {
+    winter: ["Sage. Dried, hung in a kitchen,\nremembering summer for you.", "Sage today — the grey-green\nof a pine in fog."],
+    spring: ["Sage. New leaves that haven't\ncommitted to green yet.", "Sage today. Soft, quiet, herbal —\nthe color of a garden waking up."],
+    summer: ["Sage in the heat. Silver-green,\nthe color that keeps its cool.", "Sage today — dusty leaves,\nlong afternoons, no rush."],
+    autumn: ["Sage. The garden's last soft color\nbefore the frost edits everything.", "Sage today. Faded green,\nand wiser for it."],
+  },
+  Burgundy: {
+    winter: ["Burgundy. Wine, wool, a good chair.\nThe color of staying in.", "Burgundy today — deep red\nwith the fire turned down."],
+    spring: ["Burgundy. New maple leaves\ncome out this color, before green.", "Burgundy today. Dark, warm,\na little unexpected for April."],
+    summer: ["Burgundy — the color of cherries\nleft too long, on purpose.", "Burgundy today. Deep shade\non a bright day."],
+    autumn: ["Burgundy. The oaks turn last,\nand they turn this.", "Burgundy today — the color\nautumn saves for the end."],
+  },
+  Plum: {
+    winter: ["Plum. The sky at 4:45,\nright after the light gives up.", "Plum today — winter's deepest\nsoft color."],
+    spring: ["Plum. Dusk comes later now,\nbut it still comes this color.", "Plum today. The shadow side\nof a bright season."],
+    summer: ["Plum — the fruit, heavy on the branch.\nThe color of almost too much.", "Plum today. Late, warm,\nand sweeter than it looks."],
+    autumn: ["Plum. The last berries,\nthe first long dusk.", "Plum today — the color the sky\nturns when it's finished with orange."],
+  },
+  Pink: {
+    winter: ["Pink. Dawn on the snowbank,\nbriefly, for the early risers.", "Pink today — cold cheeks,\nwarm hands, the color of coming inside."],
+    spring: ["Pink. The crabapples went off\nlike a rumor. Join in.", "Pink today. Petal, blush, the soft\nnew skin of the season."],
+    summer: ["Pink — the sky at nine p.m.,\nstill not ready to quit.", "Pink today. Rose, peony,\nthe color of plenty."],
+    autumn: ["Pink. Dusty rose, a late bloom,\nnot fooled by the calendar.", "Pink today — the sunset's\nlast soft word."],
+  },
+  Orange: {
+    summer: ["Orange. The last week of August\nturning up the heat one more notch.", "Orange today — late-summer light,\nthe color of the good peaches."],
+    autumn: ["Orange. The maples' loud cousin.\nLean in — it's the season for it.", "Orange today. Pumpkins, leaves,\nthe whole month agreed on this one.", "Orange — rust on the hinge,\nthe last warm color before the grey."],
+    winter: ["Orange. A fire in the grate,\nthe one warm thing in December.", "Orange today — a clementine\nin the middle of all that white."],
+  },
+};
+//  Small additions, one line each
+const FLANNEL_LINES = ["And a flannel over it, if you've got one.", "Flannel over the top wouldn't hurt.", "Add a flannel. It's that kind of day."];
+const WEEKEND_LINES = ["Or don't. It's the weekend.", "No one's checking. Wear it anyway.", "Off-duty. The color's just here if you want it."];
+//  The verse for a day: color x coarse season, variant chosen by date. A holiday gets
+//  its own line up top. A theme week does NOT: the banner above the outfit already names
+//  the theme, its emoji and its note, and saying it here put the same sentence on screen
+//  twice. Flannel and weekends add a soft tail.
+function verseFor(d, r) {
+  const bank = VERSES[r.shade.name] || {};
+  const pool = bank[seasonOf(d)] || Object.values(bank).flat();
+  // Independent roll: re-hash the seed so the variant doesn't correlate with the color pick.
+  const roll = hash32(hash32(daySeed(d) ^ 0x7E55E) + 0x9E37);
+  const pick = arr => arr[roll % arr.length];
+  const lines = [];
+  if (r.holiday) lines.push(r.holiday.emoji + " " + r.holiday.name + " — " + r.holiday.note + ".");
+  else if (r.vikings) lines.push("🏈 The Vikings " + r.vikings + " the day before. Purple, then.");
+  if (pool.length) lines.push(pick(pool));
+  const tail = r.isFlannel ? pick(FLANNEL_LINES) : r.weekend ? pick(WEEKEND_LINES) : null;
+  return { body: lines.join("\n"), tail };
+}
+
+// ---------------------------------------------------------------
+//  Regions — the only kind of "group" Toga has, on purpose. A region is the
+//  first three digits of a US zip (a metro or rural area, ~900 of them), and the
+//  big metros snap together so one sky = one region. Everyone in a region pulls
+//  the forecast from the SAME fixed point, so they lock the same weather and see
+//  the same color. Three digits isn't identifying — Toga never knows your address.
+//  REGIONS table lives in regions.js: prefix -> [lat, lon, label].
+// ---------------------------------------------------------------
+const REGION_KEY = "toga.region";  // "554"
+const regionOf = zip => { const p = String(zip).replace(/\D/g, "").slice(0, 3); return REGIONS[p] ? p : null; };
+const getRegion = () => { const p = localStorage.getItem(REGION_KEY); return p && REGIONS[p] ? p : null; };
+const regionInfo = p => p && REGIONS[p] ? { code: p, lat: REGIONS[p][0], lon: REGIONS[p][1], label: REGIONS[p][2] } : null;
+const regionLink = p => location.origin + location.pathname + "#r=" + p;
+function setRegion(p) {
+  if (!REGIONS[p]) throw new Error("unknown region");
+  if (localStorage.getItem(REGION_KEY) !== p) { localStorage.removeItem(WX_KEY); localStorage.removeItem(NFL_KEY); }
+  localStorage.setItem(REGION_KEY, p);
+}
+function clearRegion() { localStorage.removeItem(REGION_KEY); localStorage.removeItem(WX_KEY); localStorage.removeItem(NFL_KEY); renderAll(); }
+//  Join by link: toga/#r=554 → store the region, clean the URL.
+function joinFromHash() {
+  const m = location.hash.match(/[#&]r=(\d{3})/);
+  if (m && REGIONS[m[1]]) { setRegion(m[1]); history.replaceState(null, "", location.pathname + location.search); return m[1]; }
+  return null;
+}
+
+// ---------------------------------------------------------------
+//  Weather mood — optional, needs a region. Locked the evening before, stored
+//  on this phone, applied as a gentle nudge to the weights. Never a dependency:
+//  if there's no forecast, the pick is pure seasonal drift.
+//  Moods: sunny · cloudy · rain · snow. Source: Open-Meteo (free, no key).
+// ---------------------------------------------------------------
+const WX_KEY = "toga.wx";       // { ymd, mood, tempC, code, region }
+const WX_NUDGE = 1.6;           // multiplier on favored colors (≈20% of the mix)
+
+function moodFromCode(code) {   // WMO weather codes
+  if (code === 0 || code === 1) return "sunny";
+  if (code === 2 || code === 3 || code === 45 || code === 48) return "cloudy";
+  if (code >= 71 && code <= 77 || code === 85 || code === 86) return "snow";
+  if (code >= 51) return "rain";
+  return "cloudy";
+}
+const MOOD = {
+  sunny:  { emoji:"☀️", label:"Sunny",    favor: c => c.temp === "warm" || c.tone === "light" },
+  cloudy: { emoji:"☁️", label:"Overcast", favor: c => c.temp === "cool" && c.tone !== "light" },
+  rain:   { emoji:"🌧️", label:"Rain",     favor: c => ["Blue","Teal","Grey","Plum"].includes(c.label) },
+  snow:   { emoji:"❄️", label:"Snow",     favor: c => c.tone === "light" || c.label === "Grey" },
+};
+const ymd = d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+function loadJSON(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } }
+
+//  The locked forecast for a date, if we have one (and it's for the current region).
+function weatherFor(d) {
+  const w = loadJSON(WX_KEY);
+  return w && w.ymd === ymd(d) && w.region === getRegion() ? w : null;
+}
+
+//  The lock rule, kept strict so there are never same-morning surprises:
+//  a forecast only counts if it was locked the evening before (after 6pm) for
+//  tomorrow, from the region's fixed point. Mornings never fetch. If nothing was
+//  locked, the day runs on pure seasonal drift. Silent on any failure.
+async function refreshWeather() {
+  const reg = regionInfo(getRegion());
+  if (!reg) return;
+  const now = new Date();
+  if (now.getHours() < 18) return;                 // evenings only
+  const target = tomorrowOf(now);
+  const have = loadJSON(WX_KEY);
+  if (have && have.ymd === ymd(target) && have.region === reg.code) return;    // already locked
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${reg.lat}&longitude=${reg.lon}&daily=weather_code,temperature_2m_max&timezone=auto&forecast_days=7`;
+    const j = await (await fetch(url)).json();
+    const i = j.daily.time.indexOf(ymd(target));
+    if (i < 0) return;
+    const code = j.daily.weather_code[i];
+    localStorage.setItem(WX_KEY, JSON.stringify({ ymd: ymd(target), mood: moodFromCode(code), tempC: j.daily.temperature_2m_max[i], code, region: reg.code }));
+    colorCache.clear();                     // same reason as applyScore: it was drawn without this
+    renderAll();
+  } catch { /* no weather tonight — seasonal drift carries it */ }
+}
+
+// ---------------------------------------------------------------
+//  The stadium rule — a Minnesota easter egg. Purple the day after the Vikings win.
+//  Nothing here calls a sports API from the browser: the score arrives as nfl.json, written
+//  by .github/workflows/vikings.yml. There is a test forbidding a remote score URL in here.
+//  Scoped to Minnesota's zip prefixes (550-567) so every other Toga is exactly as it was,
+//  and it outranks theme weeks and week-long holidays (Halloween Week, Christmas Week):
+//  the day after a win is Purple even inside them. A single-day holiday keeps its day.
+//  The score comes from a key-less public scoreboard, locked into localStorage the same way
+//  the forecast is, and a failed fetch just means no easter egg. Never a dependency.
+// ---------------------------------------------------------------
+const NFL_KEY = "toga.nfl";                    // { wins:[{ymd, opponent}], region, at }
+const NFL_RECHECK_MS = 15 * 60 * 1000;         // look again this often while the page is in use
+const MN_PREFIX = /^5(5[0-9]|6[0-7])$/;        // Minnesota's zips run 550-567
+const isMinnesota = () => MN_PREFIX.test(getRegion() || "");
+const lastWord = s => String(s || "").trim().split(/\s+/).pop() || "";
+
+//  The wins in a record. The file carries the whole season ({ wins: [...] }); the older
+//  single-game shape ({ gameYmd, won, opponent }) is still read, as one win or none.
+function winsOf(nfl) {
+  if (!nfl) return [];
+  if (Array.isArray(nfl.wins)) return nfl.wins.filter(w => w && w.ymd).map(w => ({ ymd: w.ymd, opponent: w.opponent || "" }));
+  return nfl.won === true && nfl.gameYmd ? [{ ymd: nfl.gameYmd, opponent: nfl.opponent || "" }] : [];
+}
+//  The rule, as a pure function: a win on the day BEFORE a date makes that date Purple.
+//  It holds for any date, so tomorrow turns Purple the evening the game is settled, and
+//  every past day-after-a-win stays Purple in the month grid. It takes the record as an
+//  argument so it can be tested without a network, a season, or storage.
+function stadiumFor(date, nfl) {
+  const y = ymd(new Date(date.getFullYear(), date.getMonth(), date.getDate() - 1));
+  const win = winsOf(nfl).filter(w => w.ymd === y)[0];
+  if (!win) return null;
+  const opp = lastWord(win.opponent);
+  return opp ? "beat the " + opp : "won";
+}
+//  Store a result and redraw. The cache MUST be dropped first: the month is drawn before
+//  this file arrives, so a day already computed without the win would keep that colour and
+//  the easter egg would silently not appear until the next reload. Split out as its own
+//  function so the suite can assert exactly that, rather than trusting it.
+function applyScore(rec) {
+  localStorage.setItem(NFL_KEY, JSON.stringify(rec));
+  colorCache.clear();
+  renderAll();
+}
+
+//  Is there a win to report today? Always reported; only *forced* when nothing outranks it.
+const stadiumNote = d => (isMinnesota() ? stadiumFor(d, loadJSON(NFL_KEY)) : null);
+
+//  The score is fetched by a scheduled job in the repository and left as a small file next
+//  to this page, so the page reads its OWN ORIGIN. That matters: a page cannot call a
+//  sports API directly (the public scoreboards answer curl but refuse a browser's request,
+//  because curl sends no Origin header and a page always does). Reading a same-origin file
+//  also means nothing about the reader leaves their device, and the service worker keeps a
+//  copy so it still works offline. No file means no easter egg, never an error.
+//  The file holds every win of the season; which days those colour is decided here, by the
+//  rule above, so a missed run cannot produce a wrong colour, only a late one.
+//  It is re-read every 15 minutes while the page is in use (and whenever the app is brought
+//  back to the front), so a game that ends this afternoon shows on tomorrow this evening.
+async function refreshNFL() {
+  if (!isMinnesota()) return;
+  const have = loadJSON(NFL_KEY), region = getRegion();
+  if (have && have.region === region && Date.now() - (have.at || 0) < NFL_RECHECK_MS) return;
+  try {
+    const res = await fetch("nfl.json", { cache: "no-store" });
+    if (!res.ok) return;
+    const wins = winsOf(await res.json());
+    const rec = { wins, region, at: Date.now() };
+    const changed = !have || have.region !== region || JSON.stringify(winsOf(have)) !== JSON.stringify(wins);
+    if (changed) applyScore(rec);                       // new result: drop the cache and redraw
+    else localStorage.setItem(NFL_KEY, JSON.stringify(rec));
+  } catch { /* no file, no easter egg */ }
+}
+
+// ---------------------------------------------------------------
+//  Flannel — not a color, a texture note layered ON the day's color:
+//  "Blue — and if you've got a flannel, today's the day." The color is always the
+//  normal seasonal pick; flannel never replaces or outranks anything.
+//  Odds follow a cold-season curve (per month, in 1/16ths): quiet in October,
+//  peak Dec–Jan, fading out by April. Never two days in a row.
+// ---------------------------------------------------------------
+const FLANNEL_CURVE = [3, 3, 2, 0, 0, 0, 0, 0, 0, 1, 2, 3];   // Jan..Dec, out of 16 → peak ≈ 1 in 5, shoulder ≈ 1 in 16
+const daySeed = d => d.getFullYear() * 1000 + Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 86400000);
+const flannelRoll = d => hash32(daySeed(d) ^ 0x5EED) % 16 < FLANNEL_CURVE[d.getMonth()];
+const isFlannelDay = d => flannelRoll(d) && !flannelRoll(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1));
+
+// ---------------------------------------------------------------
+//  Holiday overrides — these dates just win.
+// ---------------------------------------------------------------
+const HOLIDAYS = [
+  { name:"Valentine's Day",   emoji:"🌹", color:byLabel("Pink"),    when:[2,14],  note:"Pink or red, your call" },
+  { name:"St. Patrick's Day", emoji:"☘️", color:byLabel("Green"),   when:[3,17],  note:"Green or get pinched" },
+  { name:"Independence Day",  emoji:"🎆", color:byLabel("Red"),     when:[7,4],   note:"Red, white & blue — any of the three" },
+  { name:"Halloween Week",    emoji:"🎃", color:byLabel("Orange"),  range:{from:[10,26], to:[10,31]}, note:"Pumpkin week — orange all the way" },
+  { name:"Christmas Week",    emoji:"🎄", color:byLabel("Red"),     range:{from:[12,21], to:[12,24]}, note:"Red one day, green the next" },
+  { name:"New Year's Eve",    emoji:"🥂", color:byLabel("Black"),   when:[12,31], note:"Black tie, or close enough" },
+];
+function holidayFor(d) {
+  const m = d.getMonth() + 1, day = d.getDate();
+  for (const h of HOLIDAYS) {
+    if (h.when && h.when[0] === m && h.when[1] === day) return h;
+    if (h.range) {
+      const [fm, fd] = h.range.from, [tm, td] = h.range.to;
+      if ((m > fm || (m === fm && day >= fd)) && (m < tm || (m === tm && day <= td)))
+        return h.name === "Christmas Week" ? { ...h, color: byLabel(day % 2 ? "Red" : "Green") } : h;
+    }
+  }
+  if (m === 11 && d.getDay() === 4 && Math.ceil(day / 7) === 4)
+    return { name:"Thanksgiving", emoji:"🦃", color:byLabel("Brown"), note:"Earthy browns for the feast" };
+  return null;
+}
+
+// ---------------------------------------------------------------
+//  Moon — kept for the hero tagline. Genuinely astronomical, and people like it.
+// ---------------------------------------------------------------
+function getMoon(date) {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const synodic = 29.53058867, knownNew = Date.UTC(2000, 0, 6, 18, 14, 0);
+  const frac = ((((d.getTime() - knownNew) / 86400000) % synodic) + synodic) % synodic / synodic;
+  const idx = Math.round(frac * 8) % 8;
+  const NAMES  = ["New Moon","Waxing Crescent","First Quarter","Waxing Gibbous","Full Moon","Waning Gibbous","Last Quarter","Waning Crescent"];
+  const EMOJIS = ["🌑","🌒","🌓","🌔","🌕","🌖","🌗","🌘"];
+  return { frac, name: NAMES[idx], emoji: EMOJIS[idx] };
+}
+
+// ---------------------------------------------------------------
+//  The sky. Real astronomy, computed here — no API, no ephemeris table, works
+//  offline. Low-precision solar position from the Astronomical Almanac, good to
+//  about a hundredth of a degree, which is far finer than a page like this needs.
+//  Every number below can be checked against any almanac; test.html checks several.
+// ---------------------------------------------------------------
+const RAD = Math.PI / 180, SUN_DEG_PER_DAY = 0.9856474;   // mean solar motion
+
+//  Days since J2000.0 (2000-01-01 12:00 UTC), taken at noon UTC so the value is
+//  stable for a whole local date rather than drifting across it.
+function daysSinceJ2000(date) {
+  return (Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 12) - Date.UTC(2000, 0, 1, 12)) / 86400000;
+}
+//  Ecliptic longitude of the sun — 0° at the March equinox, 90° June solstice,
+//  180° September, 270° December. The one number that really is "where the year is".
+function solarLongitude(date) {
+  const n = daysSinceJ2000(date);
+  const g = (357.528 + 0.9856003 * n) * RAD;            // mean anomaly
+  const L = 280.460 + SUN_DEG_PER_DAY * n;              // mean longitude
+  return ((L + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) % 360 + 360) % 360;
+}
+//  How far north or south of the celestial equator the sun stands.
+function solarDeclination(date) {
+  const eps = (23.439 - 0.0000004 * daysSinceJ2000(date)) * RAD;   // axial tilt
+  return Math.asin(Math.sin(eps) * Math.sin(solarLongitude(date) * RAD)) / RAD;
+}
+//  Hours of daylight at a latitude. Returns 0 or 24 inside the polar circles,
+//  where the sun genuinely does not rise or set.
+function dayLengthHours(lat, date) {
+  const dec = solarDeclination(date) * RAD, phi = lat * RAD;
+  const cosH = (Math.sin(-0.833 * RAD) - Math.sin(phi) * Math.sin(dec)) / (Math.cos(phi) * Math.cos(dec));
+  if (cosH >= 1) return 0;
+  if (cosH <= -1) return 24;
+  return 2 * Math.acos(cosH) / RAD / 15;
+}
+//  Change in daylight over `days` days, in minutes — "how much light we're gaining".
+function dayLengthDeltaMinutes(lat, date, days) {
+  const a = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const b = new Date(a.getFullYear(), a.getMonth(), a.getDate() + days);
+  return (dayLengthHours(lat, b) - dayLengthHours(lat, a)) * 60;
+}
+//  The sun's height above the horizon at local solar noon.
+function solarNoonAltitude(lat, date) { return 90 - Math.abs(lat - solarDeclination(date)); }
+function dayOfYear(d) { return Math.floor((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(d.getFullYear(), 0, 1)) / 86400000); }
+function daysInYear(y) { return dayOfYear(new Date(y, 11, 31)) + 1; }
+
+const SEASON_MARKS = [[0, "March equinox"], [90, "June solstice"], [180, "September equinox"], [270, "December solstice"]];
+//  Degrees of ecliptic longitude still to run before the sun reaches `target`:
+//  positive before the crossing, negative after.
+function degreesTo(target, date) {
+  const r = ((target - solarLongitude(date)) % 360 + 360) % 360;
+  return r > 180 ? r - 360 : r;
+}
+//  The instant the sun crosses an ecliptic longitude, interpolated between the two
+//  noons that bracket it. Sampling whole days is not enough: a crossing that falls
+//  after noon UTC brackets a day late, which is how an equinox gets reported on the
+//  wrong date. Interpolating also beats the mean solar rate, which drifts up to a
+//  couple of days across a season.
+function seasonCrossing(date, target) {
+  const noonUTC = d => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 12);
+  for (let i = 1; i <= 400; i++) {
+    const a = new Date(date.getFullYear(), date.getMonth(), date.getDate() + i - 1);
+    const b = new Date(date.getFullYear(), date.getMonth(), date.getDate() + i);
+    const ra = degreesTo(target, a), rb = degreesTo(target, b);
+    if (ra > 0 && rb <= 0) {
+      const f = ra / (ra - rb);
+      return new Date(noonUTC(a) + f * (noonUTC(b) - noonUTC(a)));
+    }
+  }
+  return null;
+}
+function nextSeasonMark(date) {
+  const lam = solarLongitude(date);
+  let target = null;
+  for (const [t, name] of SEASON_MARKS) {
+    const deg = ((t - lam) % 360 + 360) % 360;
+    if (!target || deg < target.deg) target = { t, name, deg };
+  }
+  const at = seasonCrossing(date, target.t);
+  if (!at) return { name: target.name, at: null, days: null };
+  const midnight = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  const crossingDay = Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate());
+  return { name: target.name, at: at.toISOString(), days: Math.round((crossingDay - midnight) / 86400000) };
+}
+//  Meteor showers at their real peak dates. These recur to within a day or so, so
+//  a non-leap year table is honest at this resolution.
+const SHOWERS = [
+  { name: "the Quadrantids",   month: 0,  day: 3,  span: 4 },
+  { name: "the Lyrids",        month: 3,  day: 22, span: 4 },
+  { name: "the Eta Aquariids", month: 4,  day: 6,  span: 5 },
+  { name: "the Perseids",      month: 7,  day: 12, span: 5 },
+  { name: "the Orionids",      month: 9,  day: 21, span: 5 },
+  { name: "the Leonids",       month: 10, day: 17, span: 4 },
+  { name: "the Geminids",      month: 11, day: 14, span: 5 },
+];
+function meteorShower(date) {
+  const doy = dayOfYear(date), len = daysInYear(date.getFullYear());
+  for (const s of SHOWERS) {
+    const peak = dayOfYear(new Date(date.getFullYear(), s.month, s.day));
+    let d = doy - peak;
+    if (d > len / 2) d -= len;
+    if (d < -len / 2) d += len;
+    if (Math.abs(d) <= s.span) return { name: s.name, days: d };
+  }
+  return null;
+}
+
+//  Everything the page knows about the sky today. `lat` is optional: without a
+//  region we still know the sun's place in the year, just not local daylight.
+function skyFor(date, lat) {
+  const has = typeof lat === "number" && isFinite(lat);
+  return {
+    longitude: solarLongitude(date),
+    declination: solarDeclination(date),
+    noonAltitude: has ? solarNoonAltitude(lat, date) : null,
+    dayLength: has ? dayLengthHours(lat, date) : null,
+    deltaMinutes: has ? dayLengthDeltaMinutes(lat, date, 1) : null,
+    nextMark: nextSeasonMark(date),
+    shower: meteorShower(date),
+    moon: getMoon(date),
+    hasLat: has,
+  };
+}
+
+// ---------------------------------------------------------------
+//  Meaning. Three banks, all of them checkable:
+//
+//   THREADS  — what the day's colour actually is in the world. Named sources
+//              and dates only; no folklore invented to fill a gap.
+//   ALMANAC  — real calendrical history, keyed to the astronomical moment rather
+//              than a fixed day, because the year's hinges are what people built
+//              calendars and festivals around. Eight windows cover the whole year.
+//   LINES    — public-domain poetry only, each with its work and date, so any
+//              reader can check it. Nothing here is under copyright: every author
+//              died more than a century ago and every text predates 1901.
+//              Modern translations (Barks' Rumi, most Bashō) are still in
+//              copyright and are deliberately absent.
+// ---------------------------------------------------------------
+const THREADS = {
+  Purple: "The hardest colour in the world to make, so it spent most of history belonging to whoever could afford it — a sea snail on one coast, a lichen on another. Then in 1856 a chemistry student looking for a cure for malaria made mauve by accident, and purple was cheap overnight.",
+  Red: "Ochre. Red earth, dug up, ground and painted onto cave walls tens of thousands of years ago — among the oldest pigments anyone has found, and still the colour of anything that wants to be noticed.",
+  Blue: "Blue is rare among living things, so the oldest blues came out of the ground: lapis, ground fine and carried a very long way. Indigo came from a leaf instead, and it stained your hands for a week.",
+  Green: "Green is everywhere in the world and nearly nowhere in pigment — most old greens darkened, or turned brown, or were poison. It is the one colour life makes better than we do.",
+  Brown: "Brown is what almost everything becomes. Soil, bark, bread crust, the outside of a seed. The least dramatic colour there is, and the one the world is mostly made of.",
+  Grey: "Grey is the colour of distance — air between you and a far hill. The further off a thing is, the greyer it goes, which is why grey reads as calm rather than as empty.",
+  White: "White is every colour arriving at once, which is why snow and cloud and noon all give the same answer. It is also the easiest colour to lose.",
+  Black: "Black is the absence of reflected light, and one of the hardest colours to get into cloth — most blacks of the past were very dark browns, blues or greens, and everyone agreed to call them black.",
+  Yellow: "Yellow ochre is among the oldest pigments there is, right alongside red. It is also the colour the eye finds first, which is why it came to mean caution as often as it means spring.",
+  Pink: "Pink is not in the rainbow — there is no pink in the spectrum. It is what you get when you lighten red, and the sky does it at dawn and dusk, which is probably why it reads as a time of day rather than as a colour.",
+  Orange: "Orange is the only colour in the rainbow named after a fruit. English had no word for it until the oranges arrived; before that people called the colour yellow-red.",
+  Teal: "Teal is a duck. The colour is named after the bird's wing patch, which is exactly that shade of blue-green.",
+  Coral: "Coral is an animal that builds stone, and the colour is the animal — the pink-orange of the skeleton, and of the sky at the end of a clear day.",
+  Sage: "Sage is a plant and its own colour. The grey in those leaves is a waxy coating that holds water in, which is what a plant does when it expects a dry spell.",
+  Burgundy: "Burgundy is a wine region before it is a colour, and the shade is the wine: deep, dark, and named after the place it came from.",
+  Plum: "Plum is the skin of a thing rather than a dye — the bloom on the fruit, and the last colour the sky holds before it goes fully dark.",
+};
+
+//  History at the year's eight hinges. `near` is ecliptic longitude; `span` is the
+//  half-width in degrees, so the eight windows tile the whole year with no gaps.
+const ALMANAC = [
+  { near: 0, span: 23, facts: [
+    "The equinox is the one day the sun rises due east and sets due west from everywhere on Earth. If you want to find true east, that is the morning to do it.",
+    "\"Equinox\" means equal night, but they are not quite equal: the sun is a disc rather than a point, so it is already up when its centre crosses the horizon, and the air bends the light a little more. Daylight runs several minutes long.",
+    "In 1582 the calendar had drifted ten days out of step with the equinox. The fix was to delete them: people went to bed on 4 October and woke on the 15th.",
+    "The drift came from the year not being a whole number of days — 365.2422 of them. Ignore the leftover and the calendar slides a full day every four years.",
+  ]},
+  { near: 45, span: 23, facts: [
+    "Halfway between the equinox and the solstice is a cross-quarter day, the old calendar's second hinge. In Gaelic Ireland and Scotland this one was Beltane, when the cattle went up to the summer pasture.",
+    "May Day and the maypole sat here long before anyone wrote the date down. The hawthorn flowers now, which is a calendar of its own.",
+    "Quarter days and cross-quarter days divide the year into eighths, which is about as fine as a farming calendar ever needed to be.",
+  ]},
+  { near: 90, span: 23, facts: [
+    "\"Solstice\" means sun-standing-still: the day the sun stops climbing and turns back. Around it the noon shadow barely moves for weeks, so you could find it with nothing but a stick in the ground.",
+    "Chinese astronomers measured solstice shadows with a gnomon for thousands of years, and the surviving records run back over three thousand.",
+    "Stonehenge's axis lines up on the midsummer sunrise and the midwinter sunset — one alignment, both ends of the year.",
+    "The longest day is not the hottest. Land and water take weeks to catch up with the sun, which is why the heat arrives about a month late.",
+  ]},
+  { near: 135, span: 23, facts: [
+    "The first harvest. In England this was Lammas, the loaf-mass, when the first grain was baked into bread — the point in the year where the gamble of spring either paid or did not.",
+    "In Gaelic tradition it was Lughnasadh, with games and gatherings on hilltops. Harvest festivals gather at this cross-quarter in a good many northern calendars, because this is when the grain is in.",
+    "The Perseids peak around here, the year's most reliable meteor shower. People have watched it for close to two thousand years, and Chinese observers wrote it down.",
+  ]},
+  { near: 180, span: 23, facts: [
+    "The harvest moon is the full moon nearest this equinox. For a few nights it rises only about twenty minutes later each night instead of fifty, so it lit the fields several evenings running — a real effect of the moon's shallow angle to the horizon.",
+    "Before time zones every town kept its own noon, and every railway timetable was nonsense. Standard time arrived with the railways, because you cannot run a train on local sun.",
+    "In 1752 Britain finally gave up the old calendar and lost eleven days doing it: September ran the 2nd, and then the 14th.",
+  ]},
+  { near: 225, span: 23, facts: [
+    "The far end of the harvest — what is left once the last of it is in. In Gaelic tradition this was Samhain, the beginning of the dark half of the year.",
+    "The Taurid and Leonid showers fall around here. The Leonids have produced storms of thousands of meteors an hour when the Earth crosses a comet's debris trail edge-on, which it does in a big way roughly every thirty-three years.",
+    "England began its legal year on 25 March until 1752, so January and February belonged to the year before. Dates in that stretch were often written with two years on them.",
+  ]},
+  { near: 270, span: 23, facts: [
+    "The shortest day, and the turn. From here the light comes back — slowly at first, about a minute a day, and fastest around the equinoxes.",
+    "Newgrange in Ireland is older than the pyramids at Giza, and its inner chamber is lit at sunrise near this solstice through a roof box built for exactly that. It has been doing it for more than five thousand years.",
+    "Inside the Arctic Circle the sun does not rise at all — for a few days near the circle, and for months further up. Above the circle the year has a different shape entirely.",
+    "Almost every culture in the high latitudes arrived at a festival of light at the solstice, and it is not hard to see why: this is the moment the year stops taking and starts giving back.",
+  ]},
+  { near: 315, span: 23, facts: [
+    "The first cross-quarter of the year, and the first sign it has turned. In Gaelic tradition this was Imbolc, when the ewes came into milk and the ground began to soften.",
+    "Groundhog Day sits about here — a weather proverb dressed up as an animal. The midpoint between the solstice and the equinox is a reasonable place to guess about spring, which is probably why so many calendars put something there.",
+    "The far north and the tropics disagree about this month entirely. Inside the Arctic it is still deep winter; near the equator it is simply the dry season.",
+  ]},
+];
+//  A handful of dates worth naming exactly.
+const ALMANAC_DATES = {
+  "10-04": "On this date in 1582 the Gregorian calendar skipped ten days to catch up with the equinox. On the same date in 1957, Sputnik went up — the first thing anyone had put in orbit.",
+  "09-14": "The day Britain caught up: after 2 September 1752 came the 14th, eleven days gone at a stroke.",
+  "02-29": "The leap day. It exists because the year runs about six hours longer than 365 days; without it the calendar slips a whole day every four years.",
+  "04-12": "In 1961 Yuri Gagarin went up and came back, and the day acquired a new kind of history.",
+  "07-20": "In 1969 two people walked on the Moon. The computer that got them there had less memory than a single photograph takes up now.",
+  "03-25": "This used to be New Year's Day in England, and the legal year ran from here — which is why old dates in January and February often carry two years on them.",
+};
+
+//  Public-domain poetry and scripture. Every entry names its work and date. All are
+//  pre-1901, and every author died more than a century ago, so there is nothing here
+//  under copyright. `color`/`season` tag it against the day; untagged lines are
+//  general and can land anywhere.
+const LINES = [
+  { t: "To every thing there is a season, and a time to every purpose under the heaven.", src: "Ecclesiastes 3:1, King James Bible (1611)" },
+  { t: "A thing of beauty is a joy for ever.", src: "Keats, Endymion (1818)" },
+  { t: "The poetry of earth is never dead.", src: "Keats, 'On the Grasshopper and Cricket' (1817)" },
+  { t: "To see a World in a Grain of Sand\nAnd a Heaven in a Wild Flower", src: "Blake, 'Auguries of Innocence' (c. 1803)" },
+  { t: "He who binds to himself a joy\nDoes the winged life destroy", src: "Blake, 'Eternity' (c. 1803)" },
+  { t: "If eyes were made for seeing,\nThen Beauty is its own excuse for being", src: "Emerson, 'The Rhodora' (1834)" },
+  { t: "Daughters of Time, the hypocritic Days,\nMuffled and dumb like barefoot dervishes", src: "Emerson, 'Days' (1857)" },
+  { t: "In Wildness is the preservation of the World.", src: "Thoreau, 'Walking' (1862)" },
+  { t: "I went to the woods because I wished to live deliberately.", src: "Thoreau, Walden (1854)" },
+  { t: "When I heard the learn'd astronomer,\n… Look'd up in perfect silence at the stars.", src: "Walt Whitman, 'When I Heard the Learn'd Astronomer' (1865)" },
+  { t: "I loaf and invite my soul.", src: "Walt Whitman, Song of Myself (1855)" },
+  { t: "A noiseless patient spider,\nI mark'd where on a little promontory it stood isolated", src: "Walt Whitman, 'A Noiseless Patient Spider' (1891)" },
+  { t: "The Brain—is wider than the Sky—", src: "Emily Dickinson, Poems (1890)" },
+  { t: "Hope is the thing with feathers\nThat perches in the soul", src: "Emily Dickinson, Poems (1890)" },
+  { t: "No man is an island, entire of itself.", src: "John Donne, Devotions upon Emergent Occasions (1624)" },
+  { t: "Gather ye rosebuds while ye may,\nOld Time is still a-flying", src: "Robert Herrick, 'To the Virgins, to Make Much of Time' (1648)" },
+  { t: "Annihilating all that's made\nTo a green thought in a green shade.", src: "Andrew Marvell, 'The Garden' (1681)", color: "Green" },
+  { t: "Canst thou bind the sweet influences of Pleiades, or loose the bands of Orion?", src: "Job 38:31, King James Bible (1611)" },
+  { t: "I do set my bow in the cloud, and it shall be for a token.", src: "Genesis 9:13, King James Bible (1611)" },
+  { t: "The Tao that can be trodden is not the enduring and unchanging Tao.", src: "Laozi, Tao Te Ching, tr. James Legge (1891)" },
+  { t: "Look how the floor of heaven\nIs thick inlaid with patines of bright gold.", src: "Shakespeare, The Merchant of Venice (c. 1597)" },
+  { t: "There's not the smallest orb which thou behold'st\nBut in his motion like an angel sings.", src: "Shakespeare, The Merchant of Venice (c. 1597)" },
+  { t: "A host, of golden daffodils;\nBeside the lake, beneath the trees,\nFluttering and dancing in the breeze.", src: "Wordsworth, 'I Wandered Lonely as a Cloud' (1807)", season: "spring" },
+  { t: "And then my heart with pleasure fills,\nAnd dances with the daffodils.", src: "Wordsworth, 'I Wandered Lonely as a Cloud' (1807)", season: "spring" },
+  { t: "Nothing is so beautiful as Spring—", src: "Gerard Manley Hopkins, 'Spring' (1877)", season: "spring" },
+  { t: "The world is charged with the grandeur of God.", src: "Gerard Manley Hopkins, 'God's Grandeur' (1877)" },
+  { t: "If Winter comes, can Spring be far behind?", src: "Shelley, 'Ode to the West Wind' (1820)" },
+  { t: "Fair daffodils, we weep to see\nYou haste away so soon.", src: "Robert Herrick, 'To Daffodils' (1648)", season: "spring" },
+  { t: "I know a bank where the wild thyme blows,\nWhere oxlips and the nodding violet grows.", src: "Shakespeare, A Midsummer Night's Dream (c. 1595)", season: "summer", color: "Purple" },
+  { t: "Summer's lease hath all too short a date.", src: "Shakespeare, Sonnet 18 (1609)", season: "summer" },
+  { t: "Full many a glorious morning have I seen\nFlatter the mountain-tops with sovereign eye.", src: "Shakespeare, Sonnet 33 (1609)" },
+  { t: "Season of mists and mellow fruitfulness,\nClose bosom-friend of the maturing sun.", src: "Keats, 'To Autumn' (1819)", season: "autumn" },
+  { t: "Where are the songs of spring? Ay, where are they?\nThink not of them, thou hast thy music too.", src: "Keats, 'To Autumn' (1819)", season: "autumn" },
+  { t: "And gathering swallows twitter in the skies.", src: "Keats, 'To Autumn' (1819)", season: "autumn" },
+  { t: "I leant upon a coppice gate\nWhen Frost was spectre-gray.", src: "Thomas Hardy, 'The Darkling Thrush' (1900)", season: "winter", color: "Grey" },
+  { t: "Ring out, wild bells, to the wild sky…\nThe year is dying in the night.", src: "Tennyson, In Memoriam (1850)", season: "winter" },
+  { t: "There's a certain Slant of light,\nWinter Afternoons—", src: "Emily Dickinson, Poems (1890)", season: "winter" },
+  { t: "Blow, blow, thou winter wind,\nThou art not so unkind\nAs man's ingratitude.", src: "Shakespeare, As You Like It (c. 1599)", season: "winter" },
+  { t: "How like a winter hath my absence been\nFrom thee, the pleasure of the fleeting year!", src: "Shakespeare, Sonnet 97 (1609)", season: "winter" },
+  { t: "That time of year thou mayst in me behold\nWhen yellow leaves, or none, or few, do hang.", src: "Shakespeare, Sonnet 73 (1609)", season: "autumn", color: "Yellow" },
+  { t: "The Frost performs its secret ministry,\nUnhelped by any wind.", src: "Coleridge, 'Frost at Midnight' (1798)", season: "winter" },
+  { t: "In the bleak midwinter, frosty wind made moan.", src: "Christina Rossetti (1872)", season: "winter" },
+  { t: "My heart is like a singing bird.", src: "Christina Rossetti, 'A Birthday' (1862)" },
+  { t: "The moon lies fair\nUpon the straits.", src: "Matthew Arnold, 'Dover Beach' (1867)" },
+  { t: "Tiger, Tiger, burning bright\nIn the forests of the night.", src: "Blake, 'The Tyger' (1794)", color: "Orange" },
+  { t: "Full fathom five thy father lies;\nOf his bones are coral made.", src: "Shakespeare, The Tempest (1611)", color: "Coral" },
+  { t: "As white as driven snow.", src: "Shakespeare, The Winter's Tale (c. 1611)", color: "White" },
+  { t: "Ah Sun-flower! weary of time,\nWho countest the steps of the Sun:", src: "Blake, 'Ah! Sun-flower' (c. 1794)", color: "Yellow" },
+  { t: "Roll on, thou deep and dark blue Ocean—roll!", src: "Byron, Childe Harold's Pilgrimage (1818)", color: "Blue" },
+  { t: "Water, water, every where,\nNor any drop to drink.", src: "Coleridge, The Rime of the Ancient Mariner (1798)", color: "Blue" },
+];
+
+//  History for a date: an exact date if one is named, otherwise the nearest of the
+//  year's eight hinges. Deterministic, so every phone shows the same thing.
+function almanacFor(date) {
+  const key = String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
+  if (ALMANAC_DATES[key]) return ALMANAC_DATES[key];
+  const lam = solarLongitude(date);
+  let best = null, nearest = null;
+  for (const w of ALMANAC) {
+    const raw = Math.abs(((lam - w.near) % 360 + 360) % 360);
+    const dist = Math.min(raw, 360 - raw);
+    if (!nearest || dist < nearest.dist) nearest = { w, dist };
+    if (dist <= w.span && (!best || dist < best.dist)) best = { w, dist };
+  }
+  // The eight spans tile the year, but fall back to the nearest window rather than
+  // return nothing: an empty panel is a worse failure than an approximate one.
+  const pick = best || nearest;
+  if (!pick) return null;
+  return pick.w.facts[hash32(hash32(daySeed(date) ^ 0x5A17E) + 0x2B31) % pick.w.facts.length];
+}
+//  A line to carry. Picking strictly the best-matching line narrows the pool to one
+//  whenever a colour and a season both match, so the same line repeats every time
+//  that colour comes round. Instead: pick the pool first (colour, season, or general,
+//  with the tagged pools weighted), then the line. Relevance, without the loop.
+function lineFor(date, r) {
+  const season = seasonOf(date), colour = r.shade.name;
+  const h = hash32(hash32(daySeed(date) ^ 0x1A0F) + 0x77C1);
+  const byColour = LINES.filter(l => l.color === colour);
+  const bySeason = LINES.filter(l => l.season === season && l.color !== colour);
+  const general = LINES.filter(l => !l.color && !l.season);
+  const pools = [];
+  if (byColour.length) pools.push(byColour, byColour);   // twice: a colour link is worth weighting
+  if (bySeason.length) pools.push(bySeason, bySeason);
+  if (general.length) pools.push(general);
+  const pool = pools.length ? pools[h % pools.length] : LINES;
+  return pool[hash32(h + 0x9E37) % pool.length];
+}
+//  The sky in words. Precise where we have a latitude, plainer where we do not.
+function skyNote(sky) {
+  const dms = h => { const t = Math.round(h * 60); return Math.floor(t / 60) + "h " + String(t % 60).padStart(2, "0") + "m"; };
+  const mins = m => { const t = Math.round(Math.abs(m) * 60); return (t >= 60 ? Math.floor(t / 60) + "m " : "") + (t % 60) + "s"; };
+  const out = [];
+  if (sky.hasLat) out.push("Daylight here runs " + dms(sky.dayLength) + ".");
+  out.push("The sun stands " + Math.abs(sky.declination).toFixed(1) + "° " +
+           (sky.declination >= 0 ? "north" : "south") + " of the celestial equator.");
+  if (sky.hasLat) {
+    out.push("At noon it stands " + Math.round(sky.noonAltitude) + "° up.");
+    const d = sky.deltaMinutes;
+    out.push(Math.abs(d) < 0.5 ? "This is the turning point: daylight barely changes today."
+      : "We " + (d > 0 ? "gain" : "lose") + " " + mins(d) + " of light a day.");
+  }
+  const n = sky.nextMark.days;
+  out.push(n === 0 ? "The " + sky.nextMark.name + " is today."
+    : "The " + sky.nextMark.name + " is " + n + " day" + (n === 1 ? "" : "s") + " off.");
+  out.push("The moon is " + sky.moon.name.toLowerCase() + ".");
+  const sh = sky.shower;
+  if (sh) {
+    const name = sh.name.replace(/^the /, "");
+    out.push(sh.days === 0 ? "The " + name + " peak tonight."
+      : sh.days < 0 ? "The " + name + " peaked " + Math.abs(sh.days) + " night" + (sh.days === -1 ? "" : "s") + " ago."
+      : "The " + name + " peak in " + sh.days + " night" + (sh.days === 1 ? "" : "s") + ".");
+  }
+  return out.join(" ");
+}
+//  Everything the day means, in one object.
+function meaningFor(date, r, lat) {
+  const sky = skyFor(date, lat);
+  return { sky, skyNote: skyNote(sky), thread: THREADS[r.shade.name] || null,
+           history: almanacFor(date), line: lineFor(date, r) };
+}
+
+const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+
+// ---------------------------------------------------------------
+//  The pick. Build the weighted table for the date, nudge it by weather, hash into it.
+// ---------------------------------------------------------------
+function hash32(x) {
+  x ^= x >>> 16; x = Math.imul(x, 0x7feb352d);
+  x ^= x >>> 15; x = Math.imul(x, 0x846ca68b);
+  x ^= x >>> 16; return x >>> 0;
+}
+//  The colors in play on a date, in palette order: a theme week's own set, or every
+//  color with a non-zero weight that day. The pick and the no-repeat bump both read
+//  this, so they can never disagree about what was a candidate.
+function paletteFor(d, wx) {
+  const theme = themeWeekFor(d);
+  if (theme) return theme.colors.map(byLabel);
+  return PALETTE.filter(c => weightOf(c, d, wx, null) > 0);
+}
+//  A color's integer weight. Same numbers as the old expanded-array approach
+//  (drifted weight ×10 for resolution, × WX_NUDGE when the mood favors it).
+function weightOf(c, d, wx, theme) {
+  if (theme) return 1;
+  const mood = wx && MOOD[wx.mood];
+  return Math.round(weightOn(c, d) * 10 * (mood && mood.favor(c) ? WX_NUDGE : 1));
+}
+//  Walk the cumulative ranges instead of materialising the table — O(colors), not
+//  O(total weight). Identical selection: index = hash % total, same as before.
+function pickFrom(cand, weight, nudge) {
+  const total = cand.reduce((s, c) => s + weight(c), 0);
+  if (total <= 0) return cand[0];
+  let i = (nudge >>> 0) % total;
+  for (const c of cand) { const w = weight(c); if (i < w) return c; i -= w; }
+  return cand[cand.length - 1];
+}
+function pickColor(d, wx) {
+  const theme = themeWeekFor(d);
+  return pickFrom(paletteFor(d, wx), c => weightOf(c, d, wx, theme), hash32(daySeed(d) ^ (wx ? 0xA11CE : 0)));
+}
+
+// ---------------------------------------------------------------
+//  Core: resolve a date to a color. Every day gets one — weekends included.
+//  It's all optional anyway; the weekend flag only softens the tone.
+//
+//  "No two days in a row on the same color" is a recurrence — today depends on
+//  yesterday's *final* color. It used to recurse, which only terminated because
+//  holidays return early (a holiday-free calendar would have blown the stack) and
+//  cost ~110 nested calls per date. Now: walk back to the nearest resolved day or
+//  holiday, replay forward, memoize. Iterative, bounded, and ~40× less work.
+// ---------------------------------------------------------------
+const colorCache = new Map();
+const WALK_CAP = 200;   // safety only — the real longest gap between holidays is ~114 days
+//  Memo key. NOT daySeed: that counts elapsed milliseconds from Jan 0, so the spring
+//  DST transition (which drops an hour) makes two consecutive days share a value —
+//  fine as a hash input, fatal as a cache key since a day would inherit its
+//  neighbour's context. ymd() is the actual calendar date, so it is unique.
+const cacheKey = d => ymd(d);
+
+//  Everything about a day except its color.
+function dayContext(d) {
+  const dow = d.getDay();
+  return { weekend: dow === 0 || dow === 6, dow, dayName: DAYS[dow], moon: getMoon(d),
+           season: seasonFor(d), theme: themeWeekFor(d), wx: weatherFor(d), isFlannel: isFlannelDay(d) };
+}
+function withColor(ctx, c, holiday) {
+  return { ...ctx, shade:{ name:c.label, hex:c.hex }, team:c.team,
+           family:{ label:c.label, qualifies:c.qualifies }, holiday: holiday || null };
+}
+//  The color a day picks on its own, before the no-repeat rule.
+function rawColorFor(d, ctx) {
+  const hol = holidayFor(d), win = stadiumNote(d);
+  // A win outranks theme weeks and week-long holidays (one Purple day inside the week);
+  // a single-day holiday keeps its day. `stadium` exempts it from the no-repeat rule.
+  if (hol && !(win && hol.range)) return withColor(ctx, hol.color, hol);
+  if (win) return { ...withColor(ctx, byLabel("Purple"), null), stadium: true, vikings: win };
+  return withColor(ctx, pickColor(d, ctx.wx), null);
+}
+
+function colorForDate(date) {
+  const d0 = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const cached0 = colorCache.get(cacheKey(d0));
+  if (cached0) return cached0;
+
+  // Walk back collecting unresolved days, until a cached day or a holiday stops us.
+  const chain = [];
+  for (let cur = d0, i = 0; i <= WALK_CAP; i++) {
+    const hit = colorCache.get(cacheKey(cur));
+    if (hit) { chain.push({ d:cur, r:hit, done:true }); break; }
+    const ctx = dayContext(cur), r = rawColorFor(cur, ctx);
+    chain.push({ d:cur, ctx, r, done:false });
+    if (r.holiday || i === WALK_CAP) break;      // a holiday depends on nothing earlier
+    cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() - 1);
+  }
+
+  // Replay forward, applying the no-repeat rule against the previous *final* color.
+  let prev = null;
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const { d, ctx, done } = chain[i];
+    if (done) { prev = chain[i].r; continue; }
+    let r = chain[i].r;
+    if (!r.holiday && !r.stadium && prev && !prev.holiday && prev.shade.name === r.shade.name) {
+      const active = [...new Set(paletteFor(d, ctx.wx))];
+      const at = active.findIndex(c => c.label === r.shade.name);
+      if (active.length > 1 && at >= 0) {
+        r = withColor(ctx, active[(at + (active.length > 4 ? 3 : 1)) % active.length], null);
+      }
+    }
+    colorCache.set(cacheKey(d), r);
+    prev = r;
+  }
+  return colorCache.get(cacheKey(d0));
+}
+
+const tomorrowOf = date => new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
+
+// ---------------------------------------------------------------
+//  Outfit — one colour a day, worn the way you already dress.
+//
+//  Toga names the day's colour and puts it on a top. It deliberately stops there: no trouser
+//  list, no second garment, no second guess. The point is that one colour drops into an
+//  outfit somebody already owns — and that the people who need this most are the ones
+//  working around a uniform, so the card says an accent of it is plenty.
+//
+//  "Your drawer" is the one thing kept from the outfit feature: tick the tops you own and
+//  the card stops assuming you have today's colour. It never changes the colour itself, so
+//  everyone in a group still matches.
+// ---------------------------------------------------------------
+const OWN_KEY = "toga.own";     // { tops:[labels] } — an empty list means "you own anything"
+function getOwn() { const o = loadJSON(OWN_KEY) || {}; return { tops: o.tops || [] }; }
+
+function outfitFor(r, own = getOwn()) {
+  const hero = { label: r.shade.name, hex: r.shade.hex, alias: r.family.qualifies };
+  // Monochrome Week's whole point is one color top to toe — so honour it literally.
+  if (r.theme && r.theme.name === "Monochrome Week")
+    return { hero, mono: true, note: "Monochrome Week — <b>" + hero.label + "</b> head to toe. Any shade of it." };
+  const low = hero.label.toLowerCase(), noTop = own.tops.length && !own.tops.includes(hero.label);
+  return { hero, mono: false, note: noTop
+    ? "No " + low + " top in the drawer? An accent of it is plenty."
+    : "An accent of " + low + " is plenty. The rest of the outfit is yours." };
+}
+
+// ---------------------------------------------------------------
+//  Rendering
+// ---------------------------------------------------------------
+const hexRGB = hex => { const c = hex.replace("#",""); return [0,2,4].map(i => parseInt(c.substr(i,2),16)); };
+//  WCAG relative luminance and contrast ratio — the real thing, used for decisions.
+const relLum = hex => { const [r, g, b] = hexRGB(hex).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126*r + 0.7152*g + 0.0722*b; };
+const contrastRatio = (a, b) => { const [x, y] = [relLum(a), relLum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+//  Hero text: white or ink, whichever reads. The luma split keeps the intended look
+//  (white on deep colors, ink on pale ones) with a floor: at 44px bold the bar is 3:1,
+//  and a candidate under 3.2 flips rather than scraping by. Orange and Coral used to
+//  land at 2.8 and 3.0 with white — they take ink now.
+function contrastText(hex) {
+  const [r, g, b] = hexRGB(hex);
+  const pref = (0.299*r + 0.587*g + 0.114*b) / 255 > 0.6 ? "#1a1a1a" : "#ffffff";
+  return contrastRatio(pref, hex) >= 3.2 ? pref : (pref === "#ffffff" ? "#1a1a1a" : "#ffffff");
+}
+//  A deep, readable version of a color for headings: pull lightness down to ~28%,
+//  keep the hue, cap saturation so neon-ish colors don't vibrate against cream.
+//  Near-greys/whites fall back to the house green so headings never go muddy. `noHue` overrides
+//  that for the mark, which must stay one colour: a green keyline around a white toga is two.
+function inkOf(hex, noHue) {
+  let [r, g, b] = hexRGB(hex).map(v => v / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2, d = max - min;
+  if (d < 0.08) return noHue || "#2f4a36";
+  let h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  h = (h * 60 + 360) % 360;
+  const s = Math.min(0.55, d / (1 - Math.abs(2 * l - 1)));
+  const L = 0.28, C = (1 - Math.abs(2 * L - 1)) * s, X = C * (1 - Math.abs((h / 60) % 2 - 1)), m = L - C / 2;
+  const [R, G, B] = h < 60 ? [C,X,0] : h < 120 ? [X,C,0] : h < 180 ? [0,C,X] : h < 240 ? [0,X,C] : h < 300 ? [X,0,C] : [C,0,X];
+  return "#" + [R, G, B].map(v => Math.round((v + m) * 255).toString(16).padStart(2, "0")).join("");
+}
+//  Let today's color flow into the page: headings, chip washes, background glows —
+//  and the paper itself. The page is cream with a light memory of the day's color.
+//  Dark/neutral days tint toward a cool slate instead (cream × black = mud).
+const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+const toHex = rgb => "#" + rgb.map(v => v.toString(16).padStart(2, "0")).join("");
+function paintPage(hex) {
+  const root = document.documentElement.style;
+  const rgb = hexRGB(hex);
+  const [r, g, b] = rgb, l = (Math.max(r, g, b) + Math.min(r, g, b)) / 510, sat = (Math.max(r, g, b) - Math.min(r, g, b)) / 255;
+  // Paper: the page IS today's color, lightly — dramatic, not subtle. Three cases —
+  //   · White day  → leave the cream alone (a white day should feel clean)
+  //   · Black/Grey → a cool slate (cream × black would be mud)
+  //   · everything else → cream pulled hard toward the color. Strength scales with the color's
+  //     lightness: bright colors (yellow, coral) can take ~50%; deep ones (burgundy, plum) ~28%
+  //     before they go heavy. Body-text contrast stays ≥ 7:1 on every color.
+  const neutral = sat < 0.10;
+  const k = 0.26 + 0.24 * Math.min(1, Math.max(0, (l - 0.25) / 0.45)); // l 0.25→0.26, l 0.70+→0.50
+  const [paper, card, line] = l > 0.85
+    ? [[247, 243, 234], [255, 253, 247], [230, 221, 201]]
+    : neutral
+      ? [[214, 222, 228], [240, 244, 247], [180, 194, 204]]
+      : [mix([247, 243, 234], rgb, k), mix([255, 253, 247], rgb, k * 0.38), mix([230, 221, 201], rgb, k * 1.3)];
+  // Small text: darker now that the paper is saturated, leaning the day's ink. Must clear 4.5:1
+  // on the paper itself (not just the card) — footer and calendar labels sit right on the paper.
+  const muted = mix([70, 76, 66], inkOf(hex) === "#2f4a36" ? [70, 76, 66] : hexRGB(inkOf(hex)), 0.35);
+  root.setProperty("--paper", toHex(paper));
+  root.setProperty("--card", toHex(card));
+  root.setProperty("--line", toHex(line));
+  root.setProperty("--muted", toHex(muted));
+  root.setProperty("--day", hex);
+  const deep = inkOf(hex, "#46494c");
+  root.setProperty("--day-ink", inkOf(hex));
+  root.setProperty("--day-deep", deep);
+  root.setProperty("--day-deep-rgb", hexRGB(deep).join(", "));
+  root.setProperty("--day-rgb", rgb.join(", "));
+  const tc = document.querySelector('meta[name="theme-color"]'); if (tc) tc.content = toHex(paper);
+}
+let selected = new Date();
+let view = new Date(selected.getFullYear(), selected.getMonth(), 1);
+const el = id => document.getElementById(id);
+const fmt = d => d.toLocaleDateString(undefined, { weekday:"long", month:"long", day:"numeric" });
+const specialMark = r => r.holiday ? " " + r.holiday.emoji : r.vikings ? " 🏈" : r.isFlannel ? " 🍂" : "";
+
+//  The optional-ness, said out loud. One line a day, rotated by date so it doesn't nag.
+const EASY = [
+  "Optional, always. Wear it if it's easy.",
+  "One less decision this morning. That's the whole idea.",
+  "Close enough counts. Any shade, any piece.",
+  "No streaks, no scores. Just a nudge.",
+  "If it's in the drawer, great. If not, no worries.",
+  "Toga picks. You decide. Or don't.",
+  "It's a suggestion, not a uniform.",
+  "Simplify the morning — the color's already chosen.",
+];
+const easyLine = d => EASY[hash32(daySeed(d) ^ 0xEA5E) % EASY.length];
+
+function renderHero(date) {
+  const r = colorForDate(date);
+  const sw = el("swatch");
+  // The hero no longer lays a field of the day's colour: the colour is on the garments now,
+  // so its text is ink on paper and needs no contrast flip at all.
+  sw.style.removeProperty("background");
+  sw.style.color = "var(--ink)";
+  paintPage(r.shade.hex);
+  document.body.dataset.season = seasonOf(date);
+  const isToday = date.toDateString() === new Date().toDateString();
+  el("swEyebrow").textContent = isToday ? "Today" : fmt(date);
+  el("swName").textContent = r.shade.name;
+  el("swHex").textContent = r.shade.hex.toUpperCase();
+  el("swTeam").textContent = r.team || "";
+  el("swTag").textContent = r.holiday ? r.holiday.emoji + " " + r.holiday.name + " — " + r.holiday.note
+    : r.dayName + " · " + r.season.emoji + " " + r.season.name + " · " + r.moon.emoji + " " + r.moon.name
+      + (r.wx ? " · " + MOOD[r.wx.mood].emoji : "") + (r.weekend ? " — off-duty" : "");
+  el("swFlannel").hidden = !r.isFlannel;
+
+  // Theme-week banner — during the week, and the week before as a heads-up.
+  // Border is a gradient of the theme's own colors.
+  const banner = el("themeBanner");
+  const upcoming = themeWeekFor(new Date(date.getFullYear(), date.getMonth(), date.getDate() + 7));
+  const themeGlass = t => "linear-gradient(90deg, " + t.colors.map(byLabel).map(c => c.hex).join(", ") + ")";
+  if (r.theme) {
+    banner.innerHTML = `<span class="t-emoji">${r.theme.emoji}</span><b>${r.theme.name}</b><span class="t-note">${r.theme.note}</span>`;
+    banner.className = "theme-banner on"; banner.style.setProperty("--tg", themeGlass(r.theme));
+  } else if (upcoming) {
+    banner.innerHTML = `<span class="t-emoji">${upcoming.emoji}</span><b>Next week: ${upcoming.name}</b><span class="t-note">${upcoming.colors.join(" · ")}</span>`;
+    banner.className = "theme-banner soon"; banner.style.setProperty("--tg", themeGlass(upcoming));
+  } else banner.className = "theme-banner";
+
+  // Tomorrow whisper
+  const nxt = tomorrowOf(date), nr = colorForDate(nxt);
+  el("swTomorrow").textContent = nxt.toLocaleDateString(undefined, { weekday:"long" }) + ": " + nr.shade.name
+    + (specialMark(nr) || (nr.theme && !r.theme ? " " + nr.theme.emoji : "") || (nr.wx ? " " + MOOD[nr.wx.mood].emoji : ""));
+
+  renderOutfit(date, r);
+
+  // The verse — one short poem in place of an explanation. Weather keeps one quiet line
+  // beneath it: Universal (no zip) · Seasonal (zip set, forecast pending) · the forecast.
+  const v = verseFor(new Date(date.getFullYear(), date.getMonth(), date.getDate()), r);
+  el("verse").textContent = v.body;
+  el("verseTail").textContent = v.tail || "";
+  const reg = regionInfo(getRegion());
+  el("verseWx").innerHTML = r.wx
+    ? MOOD[r.wx.mood].emoji + " " + MOOD[r.wx.mood].label + " · " + Math.round(r.wx.tempC * 9/5 + 32) + "° · shared with " + reg.label
+    : reg ? "🌤️ Seasonal · " + reg.label + " · tomorrow's forecast arrives this evening"
+    : "📍 Universal · <a href='#' id='setLocLink'>add your zip</a> to share the weather with everyone nearby";
+  const link = el("setLocLink"); if (link) link.onclick = e => { e.preventDefault(); openSettings(); };
+
+  // The long view — the same date, seen sideways. Real astronomy from the region's
+  // own latitude, the colour's history, and a line of public-domain poetry. All of
+  // it deterministic, so two phones showing the same day show the same page.
+  const mean = meaningFor(new Date(date.getFullYear(), date.getMonth(), date.getDate()), r, reg ? reg.lat : null);
+  el("lvThread").textContent = mean.thread || "";
+  el("lvSky").textContent = mean.skyNote;
+  el("lvHistory").textContent = mean.history || "";
+  const q = el("lvLine");
+  q.textContent = "";
+  if (mean.line) {
+    const verse = document.createElement("span");
+    verse.textContent = mean.line.t;
+    const cite = document.createElement("cite");
+    cite.textContent = mean.line.src;
+    q.appendChild(verse); q.appendChild(cite);
+  }
+}
+
+// ---------------------------------------------------------------
+//  Today's outfit — a single tee, one path.
+//  It wears a pattern woven from shades of the day's color: a different weave each day, the
+//  same one for everybody.
+// ---------------------------------------------------------------
+const GARMENT = {
+  top: "M26 7 L14 13 L5 29 L16 34 L18 28 L18 57 L46 57 L46 28 L48 34 L59 29 L50 13 L38 7 C36 11 28 11 26 7 Z",
+};
+const hexHSL = hex => {
+  const [r, g, b] = hexRGB(hex).map(v => v / 255), max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2, d = max - min;
+  if (!d) return [0, 0, l];
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [(h * 60 + 360) % 360, d / (1 - Math.abs(2 * l - 1)), l];
+};
+const hslHex = (h, s, l) => {
+  const C = (1 - Math.abs(2 * l - 1)) * s, X = C * (1 - Math.abs((h / 60) % 2 - 1)), m = l - C / 2;
+  const [R, G, B] = h < 60 ? [C,X,0] : h < 120 ? [X,C,0] : h < 180 ? [0,C,X] : h < 240 ? [0,X,C] : h < 300 ? [X,0,C] : [C,0,X];
+  return toHex([R, G, B].map(v => Math.round((v + m) * 255)));
+};
+//  Four shades of one color: the day's own first, then a deeper, a lighter and a pale one.
+//  Pale colors step down and dark ones step up, so White and Black still get four.
+function shadesOf(hex) {
+  const [h, s, l] = hexHSL(hex);
+  const steps = l > 0.75 ? [-0.10, -0.19, -0.30] : l < 0.25 ? [0.09, 0.18, 0.28] : [-0.15, 0.13, 0.25];
+  return [hex].concat(steps.map((dl, i) =>
+    hslHex((h + [-5, 5, 0][i] + 360) % 360, s * [1, 0.92, 0.75][i], Math.min(0.92, Math.max(0.08, l + dl)))));
+}
+const rect = (x, y, w, h, fill, o) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"${o ? ` opacity="${o}"` : ""}/>`;
+const stripe = (a, b, c, e) => rect(0, 0, 64, 16, a) + rect(0, 9, 64, 3.2, b) + rect(0, 13.4, 64, 1.4, e);
+//  name: [tile width, tile height, rotation, draw(day's color, deeper, lighter, pale)].
+//  The day's color is always the ground, so the top still reads as that color.
+const TOP_PATTERNS = {
+  stripes:    [64, 16, 0, stripe],
+  pinstripes: [64, 16, 90, stripe],
+  diagonals:  [64, 16, 45, stripe],
+  plaid:      [18, 18, 0, (a, b, c) => rect(0, 0, 18, 18, a) + rect(0, 0, 5, 18, b, 0.5) + rect(0, 0, 18, 5, b, 0.5)
+                                     + rect(11, 0, 1.3, 18, c) + rect(0, 11, 18, 1.3, c)],
+  gingham:    [12, 12, 0, (a, b) => rect(0, 0, 12, 12, a) + rect(0, 0, 6, 12, b, 0.38) + rect(0, 0, 12, 6, b, 0.38)],
+  dots:       [14, 14, 0, (a, b, c, e) => rect(0, 0, 14, 14, a) + `<circle cx="3.5" cy="3.5" r="2" fill="${e}"/><circle cx="10.5" cy="10.5" r="2" fill="${b}"/>`],
+  chevrons:   [14, 12, 0, (a, b, c) => rect(0, 0, 14, 12, a)
+                + `<path d="M-1 6 L7 1 L15 6" fill="none" stroke="${b}" stroke-width="2.2"/><path d="M-1 11 L7 6 L15 11" fill="none" stroke="${c}" stroke-width="1.2"/>`],
+  blocks:     [64, 64, 0, (a, b, c, e) => rect(0, 0, 64, 64, a) + rect(0, 36, 64, 28, b) + rect(0, 33, 64, 3, e)],
+};
+const TOP_KINDS = Object.keys(TOP_PATTERNS);
+//  The day's weave. A flannel day is plaid; otherwise it is drawn from the date.
+function topPattern(date, hex, flannel) {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const kind = flannel ? "plaid" : TOP_KINDS[hash32(daySeed(d) ^ 0x7E57) % TOP_KINDS.length];
+  const shades = shadesOf(hex), [w, h, turn, draw] = TOP_PATTERNS[kind];
+  return { kind, shades, svg: `<pattern id="topPat" width="${w}" height="${h}" patternUnits="userSpaceOnUse"`
+    + `${turn ? ` patternTransform="rotate(${turn})"` : ""}>${draw(...shades)}</pattern>` };
+}
+// The second path lays the hero's light onto the cloth. Same idea as the stained glass,
+// on the material you actually wear.
+const garmentSVG = (kind, hex, hero, pat) =>
+  `<svg class="garment${hero ? " hero-garment" : ""}" viewBox="0 0 64 64" aria-hidden="true">${pat ? `<defs>${pat.svg}</defs>` : ""}`
+  + `<path d="${GARMENT[kind]}" fill="${pat ? "url(#topPat)" : hex}" stroke="rgba(34,48,31,0.35)" stroke-width="1.4" stroke-linejoin="round"/>`
+  + `<path d="${GARMENT[kind]}" fill="url(#clothSheen)" style="mix-blend-mode:soft-light"/></svg>`;
+
+function renderOutfit(date, r) {
+  r = r || colorForDate(date);
+  const fit = outfitFor(r);
+  el("heroPair").innerHTML = `<div class="pg"><div class="pg-garments">`
+    + `${garmentSVG("top", fit.hero.hex, true, topPattern(date, fit.hero.hex, r.isFlannel))}</div>`
+    + `<div class="pg-label">On top</div></div>`;
+  el("fitShades").innerHTML = `<div class="fit-shade"><span class="role">Any shade</span> <i>${fit.hero.alias}</i></div>`;
+  el("fitNote").innerHTML = fit.note;
+  el("fitEasy").textContent = easyLine(date);
+}
+
+//  Your drawer. Chips are toggled in place (not re-rendered) so keyboard focus stays put.
+function openDrawer() {
+  const own = getOwn();
+  const chips = (kind, list) => list.map(c => `<button class="chip" data-kind="${kind}" data-label="${c.label}" `
+    + `aria-pressed="${own[kind].includes(c.label)}"><i style="background:${c.hex}"></i>${c.label}</button>`).join("");
+  el("ownTops").innerHTML = chips("tops", PALETTE);
+  el("drawer").classList.add("open");
+  el("drawerClose").focus();
+}
+function closeDrawer() {
+  if (!el("drawer").classList.contains("open")) return;
+  el("drawer").classList.remove("open");
+  el("drawerBtn").focus();
+}
+function toggleOwn(chip) {
+  const own = getOwn(), list = own[chip.dataset.kind], at = list.indexOf(chip.dataset.label);
+  at < 0 ? list.push(chip.dataset.label) : list.splice(at, 1);
+  localStorage.setItem(OWN_KEY, JSON.stringify(own));
+  chip.setAttribute("aria-pressed", String(at < 0));
+  renderAll();
+}
+
+function renderWeek(date) {
+  const monday = mondayOf(date), week = el("week");
+  week.innerHTML = "";
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday); d.setDate(monday.getDate() + i);
+    const r = colorForDate(d), cell = document.createElement("div");
+    cell.className = "day" + (r.weekend ? " offduty" : "") + (d.toDateString() === date.toDateString() ? " selected" : "");
+    cell.innerHTML = `<div class="dow">${DAYS[d.getDay()].slice(0,3)}</div><div class="sw" style="background:${r.shade.hex}">${r.isFlannel ? '<span class="leaf">🍂</span>' : ""}</div>
+      <div class="cname">${(r.holiday ? r.holiday.emoji + " " : "") + r.shade.name}</div>`;
+    cell.onclick = () => { selected = d; renderAll(); };
+    week.appendChild(cell);
+  }
+}
+
+function renderMonth() {
+  const y = view.getFullYear(), m = view.getMonth(), today = new Date();
+  el("monthTitle").textContent = view.toLocaleDateString(undefined, { month:"long", year:"numeric" });
+  el("monthHead").innerHTML = ["S","M","T","W","T","F","S"].map(s => `<span>${s}</span>`).join("");
+  const grid = el("monthGrid"); grid.innerHTML = "";
+  for (let i = 0; i < new Date(y, m, 1).getDay(); i++) grid.appendChild(Object.assign(document.createElement("div"), { className:"mcell blank" }));
+  for (let d = 1, n = new Date(y, m + 1, 0).getDate(); d <= n; d++) {
+    const dt = new Date(y, m, d), r = colorForDate(dt), cell = document.createElement("div");
+    cell.className = "mcell" + (r.weekend ? " offduty" : "") + (dt.toDateString() === selected.toDateString() ? " selected" : "")
+      + (dt.toDateString() === today.toDateString() ? " today" : "") + (r.theme ? " themed" : "");
+    cell.style.setProperty("--c", hexRGB(r.shade.hex).join(", "));
+    cell.innerHTML = `<div class="num">${d}</div><div class="bar" style="background:${r.shade.hex}"></div>
+      <div class="cn">${r.holiday ? r.holiday.emoji : r.shade.name}${r.isFlannel ? " 🍂" : ""}</div>`;
+    cell.onclick = () => { selected = dt; renderAll(); };
+    grid.appendChild(cell);
+  }
+}
+
+// ---------------------------------------------------------------
+//  Settings sheet — your region (the zip where you'll be)
+// ---------------------------------------------------------------
+function renderRegionLine() {
+  const reg = regionInfo(getRegion());
+  el("brandRegion").textContent = reg ? " · " + reg.label : "";
+  el("locCurrent").innerHTML = reg
+    ? `📍 <b>${reg.label}</b> <span class="muted">(region ${reg.code})</span>`
+    : "No region yet — weather is off, colors are universal.";
+  el("shareRow").style.display = reg ? "flex" : "none";
+}
+function openSettings() {
+  renderRegionLine();
+  el("locInput").value = "";
+  el("locMsg").textContent = "";
+  el("settings").classList.add("open");
+  setTimeout(() => el("locInput").focus(), 50);
+}
+function closeSettings() {
+  if (!el("settings").classList.contains("open")) return;
+  el("settings").classList.remove("open");
+  el("settingsBtn").focus();
+}
+async function saveRegion() {
+  const p = regionOf(el("locInput").value);
+  if (!p) { el("locMsg").textContent = "Hmm — try a US zip code, like 55401."; return; }
+  setRegion(p);
+  renderRegionLine();
+  el("locInput").value = "";
+  el("locMsg").textContent = "Saved. Everyone in " + REGIONS[p][2] + " sees the same color.";
+  renderAll();
+  refreshNFL();
+  refreshWeather();
+}
+async function shareRegion() {
+  const p = getRegion(); if (!p) return;
+  const url = regionLink(p), text = "Toga · one color a day, chosen by the season. Join " + REGIONS[p][2] + ":";
+  try {
+    if (navigator.share) await navigator.share({ title: "Toga", text, url });
+    else { await navigator.clipboard.writeText(url); el("locMsg").textContent = "Link copied — text it to whoever you're matching with."; }
+  } catch { el("locMsg").textContent = url; }
+}
+
+// ---------------------------------------------------------------
+//  Welcome — once, then never again
+// ---------------------------------------------------------------
+const SEEN_KEY = "toga.seen";
+function maybeWelcome(joined) {
+  if (localStorage.getItem(SEEN_KEY)) return;
+  if (joined) el("welcomeJoined").textContent = "You've joined " + REGIONS[joined][2] + " — everyone there sees the same color you do.";
+  el("welcome").classList.add("open");
+}
+function dismissWelcome() { localStorage.setItem(SEEN_KEY, "1"); el("welcome").classList.remove("open"); }
+
+function renderAll() {
+  document.title = colorForDate(selected).shade.name + " · Toga";
+  renderHero(selected); renderWeek(selected); renderMonth(); renderRegionLine();
+}
+
+el("todayBtn").onclick = () => { selected = new Date(); view = new Date(selected.getFullYear(), selected.getMonth(), 1); renderAll(); };
+el("prevMonth").onclick = () => { view.setMonth(view.getMonth() - 1); renderAll(); };
+el("nextMonth").onclick = () => { view.setMonth(view.getMonth() + 1); renderAll(); };
+el("drawerBtn").onclick = openDrawer;
+el("drawerClose").onclick = closeDrawer;
+el("drawer").onclick = e => { const chip = e.target.closest(".chip"); if (chip) toggleOwn(chip); else if (e.target === el("drawer")) closeDrawer(); };
+document.addEventListener("keydown", e => { if (e.key === "Escape") { closeDrawer(); closeSettings(); } });
+localStorage.removeItem("toga.mode");          // the color-on-bottom toggle is gone
+el("settingsBtn").onclick = openSettings;
+el("settingsClose").onclick = closeSettings;
+el("settings").onclick = e => { if (e.target === el("settings")) closeSettings(); };
+el("locSave").onclick = saveRegion;
+el("locInput").onkeydown = e => { if (e.key === "Enter") saveRegion(); };
+el("locShare").onclick = shareRegion;
+el("locClear").onclick = () => { clearRegion(); renderRegionLine(); el("locMsg").textContent = "Back to universal — no region, no weather."; };
+el("welcomeOk").onclick = dismissWelcome;
+el("welcome").onclick = e => { if (e.target === el("welcome")) dismissWelcome(); };
+
+const joined = joinFromHash();
+renderAll();
+maybeWelcome(joined);
+refreshNFL();
+refreshWeather();
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshNFL(); });
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+
+// ---------------------------------------------------------------
+//  Test surface. test.html loads this page in a same-origin iframe and asserts
+//  against this exact code, so the tests can never drift from the product. `const`
+//  declarations don't attach to window, so the pieces the suite reaches for are
+//  published here explicitly — which also documents the engine's real shape.
+// ---------------------------------------------------------------
+window.TOGA = {
+  // data
+  PALETTE, VERSES, THEME_WEEKS, HOLIDAYS, REGIONS,
+  // engine
+  colorForDate, outfitFor, verseFor, byLabel, seasonFor, getMoon, daySeed, hash32,
+  renderHero,   // renders ANY day's hero + banner + verse: the suite tests theme weeks with it
+  stadiumFor, winsOf, isMinnesota, rawColorFor, applyScore,   // the stadium rule, as testable pieces
+  moodFromCode, regionOf, paintPage, contrastText, renderAll, hexRGB, easyLine,
+  shadesOf, topPattern, TOP_KINDS, getOwn,   // the patterned top and the drawer
+  // sky — real astronomy, all computed locally
+  skyFor, solarLongitude, solarDeclination, dayLengthHours, dayLengthDeltaMinutes,
+  solarNoonAltitude, nextSeasonMark, meteorShower, dayOfYear, daysInYear,
+  // meaning — the colour's thread, the almanac, and the public-domain lines
+  meaningFor, almanacFor, lineFor, skyNote, THREADS, ALMANAC, ALMANAC_DATES, LINES,
+};

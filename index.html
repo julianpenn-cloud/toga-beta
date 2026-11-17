@@ -299,9 +299,9 @@
   }
   .swatch > *:not(.glow) { position: relative; }
   .swatch .name-row { display: flex; align-items: baseline; gap: 11px; flex-wrap: wrap; }
-  /* Sized off the viewport rather than fixed, because fixed widths overflowed the card at
-     every phone width (36px at 390, 51px at 360) and the hero's overflow:hidden cut the
-     last garment off rather than showing a scrollbar. Capped so desktop is unchanged. */
+  /* Sized off the viewport rather than fixed: fixed widths overflowed the card at every
+     phone width, and the hero's overflow:hidden cut the garment off rather than showing a
+     scrollbar. Capped so desktop is unchanged. */
   .hero-pair { --g: min(24vw, 110px);
                display: flex; align-items: flex-end; justify-content: center; gap: 14px;
                width: 100%; margin: 6px 0 0; }
@@ -543,7 +543,7 @@
         <div class="fit-shades" id="fitShades"></div>
         <div class="fit-note" id="fitNote"></div>
         <div class="fit-easy" id="fitEasy"></div>
-        <button class="link-btn" id="drawerBtn">What's in your drawer?</button>
+        <button class="link-btn" id="drawerBtn">Which tops do you own?</button>
       </div>
       <div class="panel">
         <h2>This week</h2>
@@ -603,16 +603,14 @@
   </footer>
 </div>
 
-<!-- Your drawer: what this person owns. Narrows the suggestions, never the day's color. -->
+<!-- Your drawer: the tops this person owns. Never changes the day's colour. -->
 <div class="sheet" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
   <div class="sheet-card">
     <div class="sheet-head">
-      <h3 id="drawerTitle">What's in your drawer</h3>
+      <h3 id="drawerTitle">The tops you own</h3>
       <button class="nav-btn" id="drawerClose" aria-label="Close">×</button>
     </div>
-    <p class="sheet-p">Tick what you own and Toga only suggests those. Leave a row blank and anything goes. The day's color never changes, so everyone still matches.</p>
-    <div class="own-h" id="ownBottomsH">Down below</div>
-    <div class="own-row" id="ownBottoms" role="group" aria-labelledby="ownBottomsH"></div>
+    <p class="sheet-p">Tick the ones you have. If today's colour is not among them, Toga says so and leaves the rest to you. The day's colour never changes, so everyone still matches.</p>
     <div class="own-h" id="ownTopsH">On top</div>
     <div class="own-row" id="ownTops" role="group" aria-labelledby="ownTopsH"></div>
     <p class="sheet-fine">Stored only on this device. Like everything here: optional.</p>
@@ -1539,63 +1537,29 @@ function colorForDate(date) {
 const tomorrowOf = date => new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
 
 // ---------------------------------------------------------------
-//  Outfit — the day's color goes on top, with one suggestion for below.
+//  Outfit — one colour a day, worn the way you already dress.
 //
-//  The color is only ever asked of the top half: that is where people own color, and a
-//  uniform or dress code still leaves room for an accent of it. Below is one pick from a
-//  small, neutral-biased set of trousers, so every pairing is wearable.
+//  Toga names the day's colour and puts it on a top. It deliberately stops there: no trouser
+//  list, no second garment, no second guess. The point is that one colour drops into an
+//  outfit somebody already owns — and that the people who need this most are the ones
+//  working around a uniform, so the card says an accent of it is plenty.
 //
-//  "Your drawer" narrows the picks to what this person owns. It never changes the day's
-//  color — everyone in a group still matches — only the piece below and the wording.
+//  "Your drawer" is the one thing kept from the outfit feature: tick the tops you own and
+//  the card stops assuming you have today's colour. It never changes the colour itself, so
+//  everyone in a group still matches.
 // ---------------------------------------------------------------
-const BOTTOMS = [
-  //  Blue, not denim: plenty of offices ban denim outright, so the trouser blue is the
-  //  dress kind — navy and dress blues. The label also collides with the palette's Blue
-  //  on purpose, so the day's own color is never suggested twice.
-  { label:"Blue",     hex:"#34527E", neutral:true,  alias:"navy, blue, steel, slate", curve:[4,4,4,4,4,4,4,4,4,4,4,4] },
-  { label:"Charcoal", hex:"#3A3D40", neutral:true,  alias:"charcoal, graphite, dark grey, slate",  curve:[4,4,3,2,2,2,2,2,3,4,4,4] },
-  { label:"Black",    hex:"#242424", neutral:true,  alias:"black, jet, ink",                       curve:[4,3,3,2,2,2,2,2,2,3,3,4] },
-  { label:"Khaki",    hex:"#B9A57C", neutral:true,  alias:"khaki, tan, sand, stone, chino, beige",  curve:[1,1,2,3,4,4,4,3,2,1,1,1] },
-  { label:"Cream",    hex:"#E8E0CE", neutral:true,  alias:"cream, ivory, bone, off-white",         curve:[0,0,1,2,3,3,3,3,2,1,0,0] },
-  { label:"Olive",    hex:"#59603F", neutral:false, alias:"olive, army, moss, loden",              curve:[1,1,2,3,3,2,2,2,3,3,2,1] },
-  { label:"Wine",     hex:"#5E2A33", neutral:false, alias:"wine, burgundy, maroon, oxblood",       curve:[2,2,2,1,0,0,0,0,1,3,3,2] },
-];
-const bWeight = (b, d) => Math.round(weightOn(b, d) * 10);
-const pieceOfBottom = b => ({ label:b.label, hex:b.hex, alias:b.alias });
+const OWN_KEY = "toga.own";     // { tops:[labels] } — an empty list means "you own anything"
+function getOwn() { const o = loadJSON(OWN_KEY) || {}; return { tops: o.tops || [] }; }
 
-const OWN_KEY = "toga.own";     // { bottoms:[labels], tops:[labels] } — an empty list means "anything"
-function getOwn() { const o = loadJSON(OWN_KEY) || {}; return { bottoms: o.bottoms || [], tops: o.tops || [] }; }
-
-function bottomPool(d, excludeLabel, min) {
-  const pool = BOTTOMS.filter(b => bWeight(b, d) > 0 && b.label !== excludeLabel);
-  return pool.length >= (min || 1) ? pool : BOTTOMS.filter(b => b.label !== excludeLabel);
-}
-//  One pair of trousers for the day. With nothing ticked this is the in-season pool; with a
-//  drawer it is whatever of that the person owns, widening (out of season, then even the
-//  day's own color) before it would ever suggest something they don't have.
-function bottomFor(d, heroLabel, owned) {
-  const season = bottomPool(d, heroLabel, 2), mine = pool => pool.filter(b => owned.includes(b.label));
-  const pool = [mine(season), mine(BOTTOMS.filter(b => b.label !== heroLabel)), mine(BOTTOMS)].find(p => p.length) || season;
-  return pieceOfBottom(pickFrom(pool, b => bWeight(b, d) || +(pool !== season), hash32(daySeed(d) ^ 0xAA01)));
-}
-
-function outfitFor(date, r, own = getOwn()) {
-  //  Normalise here, not at the call site: daySeed counts elapsed milliseconds from Jan 0,
-  //  so a 9pm timestamp hashes differently to a midnight one and the pick would change
-  //  during the day. Every hash input must come from a midnight date.
-  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+function outfitFor(r, own = getOwn()) {
   const hero = { label: r.shade.name, hex: r.shade.hex, alias: r.family.qualifies };
-
   // Monochrome Week's whole point is one color top to toe — so honour it literally.
   if (r.theme && r.theme.name === "Monochrome Week")
-    return { hero, bottom: hero, mono: true,
-             note: "Monochrome Week — <b>" + hero.label + "</b> head to toe. Any shade of it." };
-
-  const bottom = bottomFor(d, hero.label, own.bottoms), low = hero.label.toLowerCase();
-  const noTop = own.tops.length && !own.tops.includes(hero.label);
-  return { hero, bottom, mono: false, note: "<b>" + bottom.label + "</b> down below. "
-    + (noTop ? "No " + low + " top in the drawer? An accent of it is plenty."
-             : "In a uniform? An accent of " + low + " is plenty.") };
+    return { hero, mono: true, note: "Monochrome Week — <b>" + hero.label + "</b> head to toe. Any shade of it." };
+  const low = hero.label.toLowerCase(), noTop = own.tops.length && !own.tops.includes(hero.label);
+  return { hero, mono: false, note: noTop
+    ? "No " + low + " top in the drawer? An accent of it is plenty."
+    : "An accent of " + low + " is plenty. The rest of the outfit is yours." };
 }
 
 // ---------------------------------------------------------------
@@ -1755,13 +1719,12 @@ function renderHero(date) {
 }
 
 // ---------------------------------------------------------------
-//  Today's outfit — a tee and a pair of trousers, each a single path.
-//  The top wears a pattern woven from shades of the day's color, a different weave each
-//  day (the same one for everybody); the trousers stay plain.
+//  Today's outfit — a single tee, one path.
+//  It wears a pattern woven from shades of the day's color: a different weave each day, the
+//  same one for everybody.
 // ---------------------------------------------------------------
 const GARMENT = {
-  top:    "M26 7 L14 13 L5 29 L16 34 L18 28 L18 57 L46 57 L46 28 L48 34 L59 29 L50 13 L38 7 C36 11 28 11 26 7 Z",
-  bottom: "M17 7 L47 7 L45 57 L34 57 L32 27 L30 57 L19 57 Z",
+  top: "M26 7 L14 13 L5 29 L16 34 L18 28 L18 57 L46 57 L46 28 L48 34 L59 29 L50 13 L38 7 C36 11 28 11 26 7 Z",
 };
 const hexHSL = hex => {
   const [r, g, b] = hexRGB(hex).map(v => v / 255), max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2, d = max - min;
@@ -1813,17 +1776,14 @@ const garmentSVG = (kind, hex, hero, pat) =>
   `<svg class="garment${hero ? " hero-garment" : ""}" viewBox="0 0 64 64" aria-hidden="true">${pat ? `<defs>${pat.svg}</defs>` : ""}`
   + `<path d="${GARMENT[kind]}" fill="${pat ? "url(#topPat)" : hex}" stroke="rgba(34,48,31,0.35)" stroke-width="1.4" stroke-linejoin="round"/>`
   + `<path d="${GARMENT[kind]}" fill="url(#clothSheen)" style="mix-blend-mode:soft-light"/></svg>`;
-const ROLE_HUMAN = { top: "On top", bottom: "Down below" };
 
 function renderOutfit(date, r) {
   r = r || colorForDate(date);
-  const fit = outfitFor(date, r), pieces = [["top", fit.hero], ["bottom", fit.bottom]];
-  const svg = { top: garmentSVG("top", fit.hero.hex, true, topPattern(date, fit.hero.hex, r.isFlannel)),
-                bottom: garmentSVG("bottom", fit.bottom.hex) };
-  el("heroPair").innerHTML = pieces.map(([role]) =>
-    `<div class="pg"><div class="pg-garments">${svg[role]}</div><div class="pg-label">${ROLE_HUMAN[role]}</div></div>`).join("");
-  el("fitShades").innerHTML = pieces.map(([role, piece]) =>
-    `<div class="fit-shade"><span class="role">${ROLE_HUMAN[role]}</span> <b>${piece.label}</b> <i>${piece.alias}</i></div>`).join("");
+  const fit = outfitFor(r);
+  el("heroPair").innerHTML = `<div class="pg"><div class="pg-garments">`
+    + `${garmentSVG("top", fit.hero.hex, true, topPattern(date, fit.hero.hex, r.isFlannel))}</div>`
+    + `<div class="pg-label">On top</div></div>`;
+  el("fitShades").innerHTML = `<div class="fit-shade"><span class="role">Any shade</span> <i>${fit.hero.alias}</i></div>`;
   el("fitNote").innerHTML = fit.note;
   el("fitEasy").textContent = easyLine(date);
 }
@@ -1833,7 +1793,6 @@ function openDrawer() {
   const own = getOwn();
   const chips = (kind, list) => list.map(c => `<button class="chip" data-kind="${kind}" data-label="${c.label}" `
     + `aria-pressed="${own[kind].includes(c.label)}"><i style="background:${c.hex}"></i>${c.label}</button>`).join("");
-  el("ownBottoms").innerHTML = chips("bottoms", BOTTOMS);
   el("ownTops").innerHTML = chips("tops", PALETTE);
   el("drawer").classList.add("open");
   el("drawerClose").focus();
@@ -1976,7 +1935,7 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catc
 // ---------------------------------------------------------------
 window.TOGA = {
   // data
-  PALETTE, VERSES, THEME_WEEKS, HOLIDAYS, BOTTOMS, REGIONS,
+  PALETTE, VERSES, THEME_WEEKS, HOLIDAYS, REGIONS,
   // engine
   colorForDate, outfitFor, verseFor, byLabel, seasonFor, getMoon, daySeed, hash32,
   renderHero,   // renders ANY day's hero + banner + verse: the suite tests theme weeks with it
