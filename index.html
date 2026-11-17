@@ -958,6 +958,7 @@ async function refreshWeather() {
     if (i < 0) return;
     const code = j.daily.weather_code[i];
     localStorage.setItem(WX_KEY, JSON.stringify({ ymd: ymd(target), mood: moodFromCode(code), tempC: j.daily.temperature_2m_max[i], code, region: reg.code }));
+    colorCache.clear();                     // same reason as applyScore: it was drawn without this
     renderAll();
   } catch { /* no weather tonight — seasonal drift carries it */ }
 }
@@ -986,6 +987,16 @@ function stadiumFor(date, nfl) {
   const opp = lastWord(nfl.opponent);
   return opp ? "beat the " + opp : "won";
 }
+//  Store a result and redraw. The cache MUST be dropped first: the month is drawn before
+//  this file arrives, so a day already computed without the win would keep that colour and
+//  the easter egg would silently not appear until the next reload. Split out as its own
+//  function so the suite can assert exactly that, rather than trusting it.
+function applyScore(rec) {
+  localStorage.setItem(NFL_KEY, JSON.stringify(rec));
+  colorCache.clear();
+  renderAll();
+}
+
 //  Is there a win to report today? Always reported; only *forced* when nothing outranks it.
 const stadiumNote = d => (isMinnesota() ? stadiumFor(d, loadJSON(NFL_KEY)) : null);
 
@@ -1007,10 +1018,8 @@ async function refreshNFL() {
     if (!res.ok) return;
     const j = await res.json();
     if (!j || !j.gameYmd) return;
-    localStorage.setItem(NFL_KEY, JSON.stringify({
-      gameYmd: j.gameYmd, won: j.won === true, opponent: j.opponent || "",
-      region: getRegion(), checked: ymd(now) }));
-    renderAll();
+    applyScore({ gameYmd: j.gameYmd, won: j.won === true, opponent: j.opponent || "",
+                 region: getRegion(), checked: ymd(now) });
   } catch { /* no file, no easter egg */ }
 }
 
@@ -1944,7 +1953,7 @@ window.TOGA = {
   // engine
   colorForDate, outfitFor, verseFor, byLabel, seasonFor, getMoon, daySeed, hash32,
   renderHero,   // renders ANY day's hero + banner + verse: the suite tests theme weeks with it
-  stadiumFor, isMinnesota, rawColorFor,   // the stadium rule, as testable pieces
+  stadiumFor, isMinnesota, rawColorFor, applyScore,   // the stadium rule, as testable pieces
   moodFromCode, regionOf, paintPage, contrastText, renderAll, hexRGB, isQuiet, easyLine,
   // sky — real astronomy, all computed locally
   skyFor, solarLongitude, solarDeclination, dayLengthHours, dayLengthDeltaMinutes,

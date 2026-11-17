@@ -644,6 +644,20 @@ function run() {
     const r = A.rawColorFor(new Date(), { theme: null, wx: null, weekend: false });
     ok(!r.vikings, "claimed a Vikings result with no score stored");
   });
+  test("a score arriving after the page drew takes effect without a reload", () => {
+    //  The month grid renders before nfl.json arrives. Without dropping the cache, the day is
+    //  computed without the win and keeps that colour - the egg silently never appears.
+    const saved = localStorage.getItem("toga.region");
+    localStorage.setItem("toga.region", "554");
+    const d = new Date(2026, 10, 16);
+    A.colorForDate(d);                                   // drawn without the win, so cached
+    A.applyScore({ gameYmd: "2026-11-15", won: true, opponent: "Chicago Bears",
+                   region: "554", checked: "2026-11-16" });
+    eq(A.colorForDate(d).shade.name, "Purple",
+       "the day must recompute once the score lands, not keep the cached colour");
+    localStorage.removeItem("toga.nfl");
+    if (saved) localStorage.setItem("toga.region", saved); else localStorage.removeItem("toga.region");
+  });
   test("a win forces Purple only when nothing bigger is happening", () => {
     const d = new Date(), y = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1);
     const ym = y.getFullYear() + "-" + String(y.getMonth() + 1).padStart(2, "0") + "-" + String(y.getDate()).padStart(2, "0");
