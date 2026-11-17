@@ -160,12 +160,16 @@
   .today-btn {
     font-size: 12px; font-weight: 600; color: var(--green); letter-spacing: 0.3px;
     background: transparent; border: 1px solid var(--line); border-radius: 999px;
-    padding: 8px 16px; cursor: pointer; box-shadow: var(--shadow-soft);
+    padding: 0 16px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer; box-shadow: var(--shadow-soft);
     transition: all 0.15s ease; flex-shrink: 0;
   }
   .today-btn:hover { border-color: var(--gold); color: var(--gold); }
   .hdr-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
-  .icon-btn { padding: 8px 12px; font-size: 14px; line-height: 1; }
+  .icon-btn { padding: 0 12px; min-width: 44px; font-size: 16px; line-height: 1; }
+  /* One focus ring for every control, in the day's deep ink: it clears 3:1 on every paper
+     tint. Nothing may set outline:none; the suite checks. */
+  :focus-visible { outline-style: solid; outline-width: 3px; outline-color: var(--day-deep); outline-offset: 2px; }
 
   /* ------------------------------------------------ Settings sheet */
   .sheet {
@@ -178,6 +182,7 @@
   .sheet-card {
     background: var(--card); border: 1px solid var(--line); border-radius: 18px;
     box-shadow: var(--shadow); padding: 18px 20px 16px; width: 100%; max-width: 440px;
+    max-height: calc(100dvh - 32px); overflow-y: auto;
   }
   .sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
   .sheet-head h3 { font-family: "EB Garamond", Georgia, serif; font-size: 20px; color: var(--green); }
@@ -187,11 +192,11 @@
   .loc-row { display: flex; gap: 8px; align-items: center; }
   .loc-row input {
     flex: 1; font: inherit; font-size: 14px; padding: 9px 12px; border-radius: 10px;
-    border: 1px solid var(--line); background: var(--paper); color: var(--ink); outline: none;
+    border: 1px solid var(--line); background: var(--paper); color: var(--ink); min-height: 44px;
   }
   .loc-row input:focus { border-color: var(--gold); }
   .loc-alt { margin-top: 10px; font-size: 12px; color: var(--muted); }
-  .link-btn { background: none; border: 0; padding: 0; font: inherit; font-size: 12px; color: var(--green); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+  .link-btn { background: none; border: 0; padding: 0 4px; min-height: 44px; display: inline-flex; align-items: center; font: inherit; font-size: 12px; color: var(--green); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
   .link-btn:hover { color: var(--gold); }
   .loc-msg { font-size: 12px; color: var(--gold); min-height: 16px; margin-top: 8px; }
   .loc-current .muted { color: var(--muted); font-weight: 400; }
@@ -201,7 +206,7 @@
   .welcome-lead { font-family: "EB Garamond", Georgia, serif; font-style: italic; font-size: 15px; color: var(--ink); margin: 6px 0 12px; }
   .welcome-joined:empty { display: none; }
   .welcome-joined { color: var(--green); font-weight: 600; }
-  .welcome-ok { margin-top: 6px; background: var(--green); color: var(--card); border-color: var(--green); padding: 10px 22px; }
+  .welcome-ok { margin-top: 6px; background: var(--green); color: var(--card); border-color: var(--green); padding: 0 22px; }
   .welcome-ok:hover { background: var(--gold); border-color: var(--gold); color: var(--card); }
 
   /* ------------------------------------------------ Two-column layout */
@@ -297,20 +302,17 @@
   /* Sized off the viewport rather than fixed, because fixed widths overflowed the card at
      every phone width (36px at 390, 51px at 360) and the hero's overflow:hidden cut the
      last garment off rather than showing a scrollbar. Capped so desktop is unchanged. */
-  .hero-pair { --g: min(20vw, 110px);
-               display: flex; align-items: flex-end; justify-content: center; gap: 4px;
+  .hero-pair { --g: min(24vw, 110px);
+               display: flex; align-items: flex-end; justify-content: center; gap: 14px;
                width: 100%; margin: 6px 0 0; }
   .hero-pair .garment { width: var(--g); height: var(--g); margin: 0; filter: none; }
   .hero-pair .garment.hero-garment { width: calc(var(--g) * 1.22); height: calc(var(--g) * 1.22); }
   .hero-pair .pg { display: flex; flex-direction: column; align-items: center; }
   .hero-pair .pg-garments { display: flex; align-items: flex-end; gap: 2px; }
-  .hero-pair .or { font-family: "EB Garamond", Georgia, serif; font-style: italic;
-                   font-size: 15px; color: var(--muted); align-self: center; padding: 0 2px; }
   .hero-pair .pg-label { font-family: Inter, sans-serif; font-size: 10.5px; font-weight: 600;
                          letter-spacing: 0.7px; text-transform: uppercase; color: var(--muted);
                          margin-top: 4px; }
   .swatch .defs { position: absolute; width: 0; height: 0; }
-  .swatch .fit-toggle { margin: 9px auto 0; }
   .fit-shades { display: flex; flex-direction: column; gap: 9px; }
   .fit-shade { font-size: 12.5px; line-height: 1.35; }
   .fit-shade .role { font-family: Inter, sans-serif; font-size: 9.5px; font-weight: 700;
@@ -342,37 +344,18 @@
     border: 1px solid var(--line); border-left: 3px solid var(--gold);
     border-radius: 12px; padding: 12px 15px 13px;
   }
-  .fit-toggle { display: flex; gap: 5px; margin-bottom: 13px; }
-  .fit-btn {
-    flex: 1; font: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.2px;
-    padding: 7px 8px; border-radius: 9px; cursor: pointer;
-    border: 1px solid var(--line); background: var(--card); color: var(--muted);
-    transition: all 0.15s ease;
+  .outfit .link-btn { margin-top: 2px; }
+  /* Your drawer: chips you tick. The tick mark carries the state, not colour alone. */
+  .own-h { font-size: 10px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted); margin: 14px 0 7px; }
+  .own-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 13px;
+    border-radius: 999px; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--ink);
+    background: var(--card); border: 1px solid var(--line); cursor: pointer;
   }
-  .fit-btn:hover { border-color: var(--gold); color: var(--gold); }
-  .fit-btn.on { background: var(--green); border-color: var(--green); color: var(--card); }
-  .fit-row { display: grid; grid-template-columns: 1.25fr 1fr; gap: 8px; align-items: start; }
-  .fit-piece { display: flex; flex-direction: column; align-items: center; text-align: center; min-width: 0; }
-  .fit-piece .garment { width: 40px; height: 40px; margin-bottom: 5px; filter: drop-shadow(0 2px 5px rgba(34,48,31,0.18)); }
-  /* The day's color is fixed, the pair are options — so the day gets the weight, and a
-     hairline separates "today" from "pick one of these". */
-  .fit-piece.hero-piece { border-right: 1px solid rgba(var(--day-rgb), 0.20); padding-right: 8px; }
-  .fit-piece.hero-piece .garment { width: 52px; height: 52px; }
-  .fit-label { font-size: 9px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: var(--day-ink); opacity: 0.8; }
-  .fit-name { font-family: "EB Garamond", Georgia, serif; font-size: 15px; font-weight: 600; line-height: 1.1; margin-top: 2px; }
-  .fit-piece.hero-piece .fit-name { font-size: 20px; }
-  .fit-alias {
-    font-size: 11px; color: var(--muted); line-height: 1.25; margin-top: 3px; font-style: italic;
-    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
-  }
-  @media (max-width: 520px) {
-    .fit-row { gap: 6px; }
-    .fit-piece .garment { width: 32px; height: 32px; }
-    .fit-piece.hero-piece .garment { width: 42px; height: 42px; }
-    .fit-name { font-size: 13.5px; }
-    .fit-piece.hero-piece .fit-name { font-size: 17px; }
-    .fit-alias { font-size: 10.5px; -webkit-line-clamp: 2; }
-  }
+  .chip i { width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(34,48,31,0.3); }
+  .chip[aria-pressed="true"] { border-color: var(--green); box-shadow: inset 0 0 0 1.5px var(--green); background: var(--paper); }
+  .chip[aria-pressed="true"]::after { content: "✓"; color: var(--green); font-weight: 700; }
   .fit-note { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(var(--day-rgb), 0.22); font-size: 12.5px; }
   .fit-note b { font-weight: 700; }
   .fit-easy { display: block; margin-top: 6px; font-size: 11.5px; color: var(--muted); font-style: italic; }
@@ -409,14 +392,15 @@
     margin-top: 14px; padding-top: 10px; border-top: 1px solid rgba(var(--day-rgb), 0.25);
     font-size: 11px; color: var(--muted); text-align: center; letter-spacing: 0.2px;
   }
-  .verse-wx a { color: var(--green); }
+  .verse-wx a { color: var(--green); display: inline-block; padding: 16px 4px; margin: -16px -4px; }
 
   /* ------------------------------------------------ The long view */
   /* Closed by default. The app's whole posture is "wear it if it's easy", so the
      depth is here to open if you want it and to sit quietly if you don't. */
-  .longview { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(var(--day-rgb), 0.25); }
+  .longview { margin-top: 14px; padding-top: 0; border-top: 1px solid rgba(var(--day-rgb), 0.25); }
   .longview summary {
     cursor: pointer; list-style: none; text-align: center;
+    min-height: 44px; display: flex; align-items: center; justify-content: center;
     font-size: 10px; font-weight: 600; letter-spacing: 1.8px; text-transform: uppercase;
     color: var(--day-ink); opacity: 0.85;
   }
@@ -443,9 +427,9 @@
   .month-bar h2 { margin-bottom: 0; }
   .month-nav { display: flex; gap: 5px; }
   .nav-btn {
-    width: 30px; height: 30px; border-radius: 9px;
+    width: 44px; height: 44px; border-radius: 12px;
     border: 1px solid var(--line); background: var(--card);
-    color: var(--green); font-size: 17px; line-height: 1;
+    color: var(--green); font-size: 20px; line-height: 1;
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     box-shadow: var(--shadow-soft); transition: all 0.12s ease;
   }
@@ -484,7 +468,7 @@
   /* Beta only. Sits outside the colophon so the crediting assertions keep their meaning,
      and names the live site so the two installs can never be confused. */
   footer .beta-mark { margin-top: 7px; font-size: 10.5px; color: var(--gold); letter-spacing: 0.4px; }
-  footer .beta-mark a { color: var(--gold); }
+  footer .beta-mark a { color: var(--gold); display: inline-block; padding: 16px 14px; margin: -16px -14px; }
   footer .mark-sm { width: 24px; height: 30px; opacity: 0.9; }
   /* the colophon gets its own quiet strip: a bookplate rule, narrower than the footer */
   footer .colophon {
@@ -551,10 +535,6 @@
         </div>
         <div class="hex" id="swHex"></div>
         <div class="hero-pair" id="heroPair"></div>
-        <div class="fit-toggle" role="group" aria-label="Which piece gets today's color">
-          <button class="fit-btn" id="modeTop" aria-pressed="true">Color on top</button>
-          <button class="fit-btn" id="modeBottom" aria-pressed="false">Color on bottom</button>
-        </div>
         <div class="tagline" id="swTag"></div>
         <div class="flannel" id="swFlannel" hidden>🍂 Add a flannel if it works</div>
       </div>
@@ -563,6 +543,7 @@
         <div class="fit-shades" id="fitShades"></div>
         <div class="fit-note" id="fitNote"></div>
         <div class="fit-easy" id="fitEasy"></div>
+        <button class="link-btn" id="drawerBtn">What's in your drawer?</button>
       </div>
       <div class="panel">
         <h2>This week</h2>
@@ -620,6 +601,22 @@
     <div class="fine colophon">Designed by Julian Penn in Minnesota, USA</div>
     <div class="fine beta-mark">beta build · the live one is <a href="https://julianpenn-cloud.github.io/toga/">toga</a></div>
   </footer>
+</div>
+
+<!-- Your drawer: what this person owns. Narrows the suggestions, never the day's color. -->
+<div class="sheet" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h3 id="drawerTitle">What's in your drawer</h3>
+      <button class="nav-btn" id="drawerClose" aria-label="Close">×</button>
+    </div>
+    <p class="sheet-p">Tick what you own and Toga only suggests those. Leave a row blank and anything goes. The day's color never changes, so everyone still matches.</p>
+    <div class="own-h" id="ownBottomsH">Down below</div>
+    <div class="own-row" id="ownBottoms" role="group" aria-labelledby="ownBottomsH"></div>
+    <div class="own-h" id="ownTopsH">On top</div>
+    <div class="own-row" id="ownTops" role="group" aria-labelledby="ownTopsH"></div>
+    <p class="sheet-fine">Stored only on this device. Like everything here: optional.</p>
+  </div>
 </div>
 
 <!-- Settings sheet: your region -->
@@ -1542,13 +1539,14 @@ function colorForDate(date) {
 const tomorrowOf = date => new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
 
 // ---------------------------------------------------------------
-//  Outfit — the day's color on one piece, a partner on the other.
+//  Outfit — the day's color goes on top, with one suggestion for below.
 //
-//  Wardrobes are lopsided: most people own a dozen tops and three pairs of
-//  trousers, and almost nobody owns red trousers. So the two roles draw from
-//  different pools — the full palette up top, a small neutral-biased set below —
-//  and one rule keeps every pairing wearable: a loud color gets a quiet partner.
-//  Never two loud pieces. The toggle only decides which end wears the color.
+//  The color is only ever asked of the top half: that is where people own color, and a
+//  uniform or dress code still leaves room for an accent of it. Below is one pick from a
+//  small, neutral-biased set of trousers, so every pairing is wearable.
+//
+//  "Your drawer" narrows the picks to what this person owns. It never changes the day's
+//  color — everyone in a group still matches — only the piece below and the wording.
 // ---------------------------------------------------------------
 const BOTTOMS = [
   //  Blue, not denim: plenty of offices ban denim outright, so the trouser blue is the
@@ -1562,84 +1560,42 @@ const BOTTOMS = [
   { label:"Olive",    hex:"#59603F", neutral:false, alias:"olive, army, moss, loden",              curve:[1,1,2,3,3,2,2,2,3,3,2,1] },
   { label:"Wine",     hex:"#5E2A33", neutral:false, alias:"wine, burgundy, maroon, oxblood",       curve:[2,2,2,1,0,0,0,0,1,3,3,2] },
 ];
-const QUITE_NEUTRAL = ["White","Grey","Black","Brown"];                  // colors that read as neutral
-const PANTS_OK      = ["Blue","Black","Grey","White","Brown","Green","Burgundy"];  // plausible trousers
-const isQuiet = label => QUITE_NEUTRAL.includes(label);
 const bWeight = (b, d) => Math.round(weightOn(b, d) * 10);
-const cWeight = (c, d) => Math.round(weightOn(c, d) * 10);
-
-//  Two distinct picks from a pool, deterministically. The second excludes the first and
-//  takes an optional bias, so a pair reads as two real choices rather than two shades of
-//  one idea.
-function twoPicks(seed, pool, weight, bias) {
-  const first = pickFrom(pool, weight, hash32(seed ^ 0xAA01));
-  const rest = pool.filter(c => c !== first);
-  if (!rest.length) return [first, first];
-  return [first, pickFrom(rest, c => (bias ? bias(c, first) : weight(c)), hash32(seed ^ 0xAA02))];
-}
-const pieceOfColor  = c => ({ label:c.label, hex:c.hex, alias:c.qualifies });
 const pieceOfBottom = b => ({ label:b.label, hex:b.hex, alias:b.alias });
+
+const OWN_KEY = "toga.own";     // { bottoms:[labels], tops:[labels] } — an empty list means "anything"
+function getOwn() { const o = loadJSON(OWN_KEY) || {}; return { bottoms: o.bottoms || [], tops: o.tops || [] }; }
 
 function bottomPool(d, excludeLabel, min) {
   const pool = BOTTOMS.filter(b => bWeight(b, d) > 0 && b.label !== excludeLabel);
   return pool.length >= (min || 1) ? pool : BOTTOMS.filter(b => b.label !== excludeLabel);
 }
-//  Two trousers to choose between — you may own the blue but not the khaki. All of
-//  BOTTOMS is trouser-plausible by construction; the second option leans away from the
-//  first's register so the pair isn't two neutrals saying the same thing.
-function bottomPair(d, excludeLabel) {
-  return twoPicks(daySeed(d), bottomPool(d, excludeLabel, 2), b => bWeight(b, d),
-                  (b, first) => Math.round(bWeight(b, d) * (b.neutral === first.neutral ? 1 : 1.6)))
-    .map(pieceOfBottom);
-}
-//  Two tops to wear with the day's color. A loud color demands quiet tops — BOTH of them.
-//  A quiet color lets the tops carry some, and the second leans to the other temperature
-//  so the two options aren't the same note twice.
-function topPair(d, heroLabel) {
-  const hero = byLabel(heroLabel), loud = !isQuiet(heroLabel);
-  const pool = PALETTE.filter(c => cWeight(c, d) > 0 && c.label !== heroLabel && (!loud || isQuiet(c.label)));
-  const use = pool.length >= 2 ? pool : PALETTE.filter(c => c.label === "White");
-  const want = hero && hero.temp !== "neutral" ? (hero.temp === "warm" ? "cool" : "warm") : null;
-  const weight = c => Math.round(cWeight(c, d) * (want && c.temp === want ? 1.8 : 1));
-  return twoPicks(daySeed(d), use, weight,
-                  (c, first) => Math.round(weight(c) * (c.temp === first.temp ? 0.7 : 1)))
-    .map(pieceOfColor);
+//  One pair of trousers for the day. With nothing ticked this is the in-season pool; with a
+//  drawer it is whatever of that the person owns, widening (out of season, then even the
+//  day's own color) before it would ever suggest something they don't have.
+function bottomFor(d, heroLabel, owned) {
+  const season = bottomPool(d, heroLabel, 2), mine = pool => pool.filter(b => owned.includes(b.label));
+  const pool = [mine(season), mine(BOTTOMS.filter(b => b.label !== heroLabel)), mine(BOTTOMS)].find(p => p.length) || season;
+  return pieceOfBottom(pickFrom(pool, b => bWeight(b, d) || +(pool !== season), hash32(daySeed(d) ^ 0xAA01)));
 }
 
-//  Today's outfit: the day's color on one piece (fixed), and TWO options for the other so
-//  there's a fallback pair in the drawer. One rule keeps every pairing wearable — a loud
-//  color gets quiet partners, never two loud pieces. The toggle picks which end wears it.
-function outfitFor(date, r, mode) {
+function outfitFor(date, r, own = getOwn()) {
   //  Normalise here, not at the call site: daySeed counts elapsed milliseconds from Jan 0,
-  //  so a 9pm timestamp hashes differently to a midnight one and the options would change
+  //  so a 9pm timestamp hashes differently to a midnight one and the pick would change
   //  during the day. Every hash input must come from a midnight date.
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const hero = { label: r.shade.name, hex: r.shade.hex, alias: r.family.qualifies };
-  const names = pair => pair.map(p => "<b>" + p.label + "</b>").join(" or ");
 
   // Monochrome Week's whole point is one color top to toe — so honour it literally.
   if (r.theme && r.theme.name === "Monochrome Week")
-    return { role:"top", hero, pairRole:"bottom", pair:[hero], mono:true,
+    return { hero, bottom: hero, mono: true,
              note: "Monochrome Week — <b>" + hero.label + "</b> head to toe. Any shade of it." };
 
-  const quiet = isQuiet(hero.label);
-  if (mode === "bottom") {
-    const pair = topPair(d, hero.label);
-    if (!PANTS_OK.includes(hero.label)) {
-      const fallback = pickFrom(bottomPool(d, hero.label, 1), b => bWeight(b, d), hash32(daySeed(d) ^ 0xB0770));
-      return { role:"bottom", hero, pairRole:"top", pair, mono:false,
-        note: hero.label + " trousers are a big ask. Not in the drawer? Flip it: <b>" + fallback.label
-            + "</b> below, " + hero.label + " up top." };
-    }
-    return { role:"bottom", hero, pairRole:"top", pair, mono:false, note: quiet
-      ? (pair.every(p => isQuiet(p.label))
-          ? "<b>" + hero.label + "</b> below, " + names(pair) + " up top — quiet all the way."
-          : "<b>" + hero.label + "</b> below, so the top can carry some color: " + names(pair) + ".")
-      : "The color goes low today. Keep the top quiet: " + names(pair) + "." };
-  }
-  const pair = bottomPair(d, hero.label);
-  return { role:"top", hero, pairRole:"bottom", pair, mono:false,
-    note: (quiet ? "A quiet color today — " : "One loud piece, one quiet one — ") + names(pair) + " down below." };
+  const bottom = bottomFor(d, hero.label, own.bottoms), low = hero.label.toLowerCase();
+  const noTop = own.tops.length && !own.tops.includes(hero.label);
+  return { hero, bottom, mono: false, note: "<b>" + bottom.label + "</b> down below. "
+    + (noTop ? "No " + low + " top in the drawer? An accent of it is plenty."
+             : "In a uniform? An accent of " + low + " is plenty.") };
 }
 
 // ---------------------------------------------------------------
@@ -1799,47 +1755,100 @@ function renderHero(date) {
 }
 
 // ---------------------------------------------------------------
-//  Today's outfit — two garment glyphs, filled with the two pieces.
-//  Simple silhouettes: a tee and a pair of trousers, each a single path.
+//  Today's outfit — a tee and a pair of trousers, each a single path.
+//  The top wears a pattern woven from shades of the day's color, a different weave each
+//  day (the same one for everybody); the trousers stay plain.
 // ---------------------------------------------------------------
 const GARMENT = {
   top:    "M26 7 L14 13 L5 29 L16 34 L18 28 L18 57 L46 57 L46 28 L48 34 L59 29 L50 13 L38 7 C36 11 28 11 26 7 Z",
   bottom: "M17 7 L47 7 L45 57 L34 57 L32 27 L30 57 L19 57 Z",
 };
+const hexHSL = hex => {
+  const [r, g, b] = hexRGB(hex).map(v => v / 255), max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2, d = max - min;
+  if (!d) return [0, 0, l];
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [(h * 60 + 360) % 360, d / (1 - Math.abs(2 * l - 1)), l];
+};
+const hslHex = (h, s, l) => {
+  const C = (1 - Math.abs(2 * l - 1)) * s, X = C * (1 - Math.abs((h / 60) % 2 - 1)), m = l - C / 2;
+  const [R, G, B] = h < 60 ? [C,X,0] : h < 120 ? [X,C,0] : h < 180 ? [0,C,X] : h < 240 ? [0,X,C] : h < 300 ? [X,0,C] : [C,0,X];
+  return toHex([R, G, B].map(v => Math.round((v + m) * 255)));
+};
+//  Four shades of one color: the day's own first, then a deeper, a lighter and a pale one.
+//  Pale colors step down and dark ones step up, so White and Black still get four.
+function shadesOf(hex) {
+  const [h, s, l] = hexHSL(hex);
+  const steps = l > 0.75 ? [-0.10, -0.19, -0.30] : l < 0.25 ? [0.09, 0.18, 0.28] : [-0.15, 0.13, 0.25];
+  return [hex].concat(steps.map((dl, i) =>
+    hslHex((h + [-5, 5, 0][i] + 360) % 360, s * [1, 0.92, 0.75][i], Math.min(0.92, Math.max(0.08, l + dl)))));
+}
+const rect = (x, y, w, h, fill, o) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"${o ? ` opacity="${o}"` : ""}/>`;
+const stripe = (a, b, c, e) => rect(0, 0, 64, 16, a) + rect(0, 9, 64, 3.2, b) + rect(0, 13.4, 64, 1.4, e);
+//  name: [tile width, tile height, rotation, draw(day's color, deeper, lighter, pale)].
+//  The day's color is always the ground, so the top still reads as that color.
+const TOP_PATTERNS = {
+  stripes:    [64, 16, 0, stripe],
+  pinstripes: [64, 16, 90, stripe],
+  diagonals:  [64, 16, 45, stripe],
+  plaid:      [18, 18, 0, (a, b, c) => rect(0, 0, 18, 18, a) + rect(0, 0, 5, 18, b, 0.5) + rect(0, 0, 18, 5, b, 0.5)
+                                     + rect(11, 0, 1.3, 18, c) + rect(0, 11, 18, 1.3, c)],
+  gingham:    [12, 12, 0, (a, b) => rect(0, 0, 12, 12, a) + rect(0, 0, 6, 12, b, 0.38) + rect(0, 0, 12, 6, b, 0.38)],
+  dots:       [14, 14, 0, (a, b, c, e) => rect(0, 0, 14, 14, a) + `<circle cx="3.5" cy="3.5" r="2" fill="${e}"/><circle cx="10.5" cy="10.5" r="2" fill="${b}"/>`],
+  chevrons:   [14, 12, 0, (a, b, c) => rect(0, 0, 14, 12, a)
+                + `<path d="M-1 6 L7 1 L15 6" fill="none" stroke="${b}" stroke-width="2.2"/><path d="M-1 11 L7 6 L15 11" fill="none" stroke="${c}" stroke-width="1.2"/>`],
+  blocks:     [64, 64, 0, (a, b, c, e) => rect(0, 0, 64, 64, a) + rect(0, 36, 64, 28, b) + rect(0, 33, 64, 3, e)],
+};
+const TOP_KINDS = Object.keys(TOP_PATTERNS);
+//  The day's weave. A flannel day is plaid; otherwise it is drawn from the date.
+function topPattern(date, hex, flannel) {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const kind = flannel ? "plaid" : TOP_KINDS[hash32(daySeed(d) ^ 0x7E57) % TOP_KINDS.length];
+  const shades = shadesOf(hex), [w, h, turn, draw] = TOP_PATTERNS[kind];
+  return { kind, shades, svg: `<pattern id="topPat" width="${w}" height="${h}" patternUnits="userSpaceOnUse"`
+    + `${turn ? ` patternTransform="rotate(${turn})"` : ""}>${draw(...shades)}</pattern>` };
+}
 // The second path lays the hero's light onto the cloth. Same idea as the stained glass,
 // on the material you actually wear.
-const garmentSVG = (kind, hex, hero) =>
-  `<svg class="garment${hero ? " hero-garment" : ""}" viewBox="0 0 64 64" aria-hidden="true">`
-  + `<path d="${GARMENT[kind]}" fill="${hex}" stroke="rgba(34,48,31,0.35)" stroke-width="1.4" stroke-linejoin="round"/>`
+const garmentSVG = (kind, hex, hero, pat) =>
+  `<svg class="garment${hero ? " hero-garment" : ""}" viewBox="0 0 64 64" aria-hidden="true">${pat ? `<defs>${pat.svg}</defs>` : ""}`
+  + `<path d="${GARMENT[kind]}" fill="${pat ? "url(#topPat)" : hex}" stroke="rgba(34,48,31,0.35)" stroke-width="1.4" stroke-linejoin="round"/>`
   + `<path d="${GARMENT[kind]}" fill="url(#clothSheen)" style="mix-blend-mode:soft-light"/></svg>`;
 const ROLE_HUMAN = { top: "On top", bottom: "Down below" };
 
-const MODE_KEY = "toga.mode";
-const getMode = () => (localStorage.getItem(MODE_KEY) === "bottom" ? "bottom" : "top");
-function setMode(m) { localStorage.setItem(MODE_KEY, m); renderAll(); }
-
 function renderOutfit(date, r) {
-  const mode = getMode();
-  const fit = outfitFor(date, r || colorForDate(date), mode);
-  for (const [id, on] of [["modeTop", mode === "top"], ["modeBottom", mode === "bottom"]]) {
-    el(id).classList.toggle("on", on);
-    el(id).setAttribute("aria-pressed", String(on));
-  }
-  // The day's color is fixed and the pair are the options, so its garment is the larger one,
-  // and the labels live inside each group so they line up with their own garments.
-  el("heroPair").innerHTML =
-    `<div class="pg"><div class="pg-garments">${garmentSVG(fit.role, fit.hero.hex, true)}</div>`
-    + `<div class="pg-label">${ROLE_HUMAN[fit.role]}</div></div>`
-    + `<div class="pg"><div class="pg-garments">`
-    + fit.pair.map((p, i) => (i ? `<span class="or">or</span>` : "") + garmentSVG(fit.pairRole, p.hex)).join("")
-    + `</div>`
-    + `<div class="pg-label">${fit.pair.length > 1 ? "Two options" : ROLE_HUMAN[fit.pairRole]}</div></div>`;
-  el("fitShades").innerHTML = [{ piece: fit.hero, role: fit.role }]
-    .concat(fit.pair.map(p => ({ piece: p, role: fit.pairRole })))
-    .map(x => `<div class="fit-shade"><span class="role">${ROLE_HUMAN[x.role]}</span> `
-      + `<b>${x.piece.label}</b> <i>${x.piece.alias}</i></div>`).join("");
+  r = r || colorForDate(date);
+  const fit = outfitFor(date, r), pieces = [["top", fit.hero], ["bottom", fit.bottom]];
+  const svg = { top: garmentSVG("top", fit.hero.hex, true, topPattern(date, fit.hero.hex, r.isFlannel)),
+                bottom: garmentSVG("bottom", fit.bottom.hex) };
+  el("heroPair").innerHTML = pieces.map(([role]) =>
+    `<div class="pg"><div class="pg-garments">${svg[role]}</div><div class="pg-label">${ROLE_HUMAN[role]}</div></div>`).join("");
+  el("fitShades").innerHTML = pieces.map(([role, piece]) =>
+    `<div class="fit-shade"><span class="role">${ROLE_HUMAN[role]}</span> <b>${piece.label}</b> <i>${piece.alias}</i></div>`).join("");
   el("fitNote").innerHTML = fit.note;
   el("fitEasy").textContent = easyLine(date);
+}
+
+//  Your drawer. Chips are toggled in place (not re-rendered) so keyboard focus stays put.
+function openDrawer() {
+  const own = getOwn();
+  const chips = (kind, list) => list.map(c => `<button class="chip" data-kind="${kind}" data-label="${c.label}" `
+    + `aria-pressed="${own[kind].includes(c.label)}"><i style="background:${c.hex}"></i>${c.label}</button>`).join("");
+  el("ownBottoms").innerHTML = chips("bottoms", BOTTOMS);
+  el("ownTops").innerHTML = chips("tops", PALETTE);
+  el("drawer").classList.add("open");
+  el("drawerClose").focus();
+}
+function closeDrawer() {
+  if (!el("drawer").classList.contains("open")) return;
+  el("drawer").classList.remove("open");
+  el("drawerBtn").focus();
+}
+function toggleOwn(chip) {
+  const own = getOwn(), list = own[chip.dataset.kind], at = list.indexOf(chip.dataset.label);
+  at < 0 ? list.push(chip.dataset.label) : list.splice(at, 1);
+  localStorage.setItem(OWN_KEY, JSON.stringify(own));
+  chip.setAttribute("aria-pressed", String(at < 0));
+  renderAll();
 }
 
 function renderWeek(date) {
@@ -1892,7 +1901,11 @@ function openSettings() {
   el("settings").classList.add("open");
   setTimeout(() => el("locInput").focus(), 50);
 }
-function closeSettings() { el("settings").classList.remove("open"); }
+function closeSettings() {
+  if (!el("settings").classList.contains("open")) return;
+  el("settings").classList.remove("open");
+  el("settingsBtn").focus();
+}
 async function saveRegion() {
   const p = regionOf(el("locInput").value);
   if (!p) { el("locMsg").textContent = "Hmm — try a US zip code, like 55401."; return; }
@@ -1932,8 +1945,11 @@ function renderAll() {
 el("todayBtn").onclick = () => { selected = new Date(); view = new Date(selected.getFullYear(), selected.getMonth(), 1); renderAll(); };
 el("prevMonth").onclick = () => { view.setMonth(view.getMonth() - 1); renderAll(); };
 el("nextMonth").onclick = () => { view.setMonth(view.getMonth() + 1); renderAll(); };
-el("modeTop").onclick = () => setMode("top");
-el("modeBottom").onclick = () => setMode("bottom");
+el("drawerBtn").onclick = openDrawer;
+el("drawerClose").onclick = closeDrawer;
+el("drawer").onclick = e => { const chip = e.target.closest(".chip"); if (chip) toggleOwn(chip); else if (e.target === el("drawer")) closeDrawer(); };
+document.addEventListener("keydown", e => { if (e.key === "Escape") { closeDrawer(); closeSettings(); } });
+localStorage.removeItem("toga.mode");          // the color-on-bottom toggle is gone
 el("settingsBtn").onclick = openSettings;
 el("settingsClose").onclick = closeSettings;
 el("settings").onclick = e => { if (e.target === el("settings")) closeSettings(); };
@@ -1960,12 +1976,13 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catc
 // ---------------------------------------------------------------
 window.TOGA = {
   // data
-  PALETTE, VERSES, THEME_WEEKS, HOLIDAYS, BOTTOMS, REGIONS, PANTS_OK, QUITE_NEUTRAL,
+  PALETTE, VERSES, THEME_WEEKS, HOLIDAYS, BOTTOMS, REGIONS,
   // engine
   colorForDate, outfitFor, verseFor, byLabel, seasonFor, getMoon, daySeed, hash32,
   renderHero,   // renders ANY day's hero + banner + verse: the suite tests theme weeks with it
   stadiumFor, winsOf, isMinnesota, rawColorFor, applyScore,   // the stadium rule, as testable pieces
-  moodFromCode, regionOf, paintPage, contrastText, renderAll, hexRGB, isQuiet, easyLine,
+  moodFromCode, regionOf, paintPage, contrastText, renderAll, hexRGB, easyLine,
+  shadesOf, topPattern, TOP_KINDS, getOwn,   // the patterned top and the drawer
   // sky — real astronomy, all computed locally
   skyFor, solarLongitude, solarDeclination, dayLengthHours, dayLengthDeltaMinutes,
   solarNoonAltitude, nextSeasonMark, meteorShower, dayOfYear, daysInYear,

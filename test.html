@@ -74,7 +74,7 @@ function run() {
 
   // don't disturb whatever the reader had stored
   const saved = {};
-  for (const k of ["toga.mode", "toga.region", "toga.wx", "toga.seen"]) saved[k] = app.localStorage.getItem(k);
+  for (const k of ["toga.own", "toga.region", "toga.wx", "toga.seen"]) saved[k] = app.localStorage.getItem(k);
 
   const DAY = (y, m, d) => new Date(y, m, d);
   const SPAN = 730;
@@ -528,17 +528,17 @@ function run() {
     const toHex = s => "#" + s.match(/\d+/g).slice(0, 3)
       .map(v => (+v).toString(16).padStart(2, "0")).join("");
     const card = toHex(app.getComputedStyle(sw).backgroundColor);
-    const fills = [...sw.querySelectorAll(".hero-pair .garment path")]
-      .map(p => p.getAttribute("fill")).filter(f => /^#[0-9a-f]{6}$/i.test(f || ""));
-    ok(fills.length >= 2, "the hero should show the day's garment plus its companion, got " + fills.join(","));
-    // every garment wears a real palette colour, and the shade list names each one
-    const known = A.PALETTE.concat(A.BOTTOMS);
+    // the top wears the day's colour as the ground of its pattern, the piece below is plain,
+    // and the shade list names both
+    const day = A.byLabel(doc.getElementById("swName").textContent.trim());
+    ok(day, "the hero does not name a palette colour");
+    eq((sw.querySelector("#topPat rect").getAttribute("fill") || "").toLowerCase(), day.hex.toLowerCase(),
+       "the top's pattern is not grounded in the day's colour");
+    const below = sw.querySelectorAll(".hero-pair .garment")[1].querySelector("path").getAttribute("fill");
+    const piece = A.BOTTOMS.concat(A.PALETTE).find(k => k.hex.toLowerCase() === (below || "").toLowerCase());
+    ok(piece, "the piece below wears a colour that is not in the palette: " + below);
     const shades = doc.getElementById("fitShades").textContent;
-    for (const f of fills) {
-      const c = known.find(k => k.hex.toLowerCase() === f.toLowerCase());
-      ok(c, "a garment is wearing a colour that is not in the palette: " + f);
-      if (c) ok(shades.includes(c.label), "the shade list omits " + c.label);
-    }
+    ok(shades.includes(day.label) && shades.includes(piece.label), "the shade list omits a piece that is shown");
     // and the hero's own text is ink on that card, cleared at every palette colour, because
     // the glow lays a tint of the day over it
     const glow = hx => { const c = A.hexRGB(hx), k = A.hexRGB(card);
@@ -579,17 +579,54 @@ function run() {
     const sw = doc.getElementById("swatch");
     ok(sw.scrollWidth <= sw.clientWidth + 1, "the hero's content overflows the card");
   });
-  test('the options are joined by an "or", and only when there are two', () => {
-    // Three garments in a row read as three things to wear. The separator states that the
-    // pair is a choice - and monochrome weeks return a one-item pair, which must not grow one.
-    for (const mode of ["top", "bottom"]) {
-      const d = new Date(2026, 8, 21), f = A.outfitFor(d, A.colorForDate(d), mode);
-      A.renderHero(d);
-      const group = [...doc.querySelectorAll("#heroPair .pg")][1];
-      const ors = group.querySelectorAll(".or").length;
-      const gs = group.querySelectorAll(".garment").length;
-      eq(ors, gs > 1 ? gs - 1 : 0, "separators should be one fewer than the options (" + gs + " garments)");
+  test("the colour is on top only: one top, one piece below, nothing to toggle", () => {
+    A.renderHero(new Date(2026, 8, 21));
+    eq(doc.querySelectorAll("#heroPair .garment").length, 2, "expected one top and one piece below");
+    eq(doc.querySelectorAll("#heroPair .or").length, 0, "there is nothing to choose between");
+    ok(!doc.getElementById("modeBottom") && !doc.querySelector(".fit-btn"), "the colour-on-bottom toggle is still on the page");
+    eq([...doc.querySelectorAll("#heroPair .pg-label")].map(l => l.textContent).join("|"), "On top|Down below");
+    eq(doc.querySelector("#heroPair .hero-garment path").getAttribute("fill"), "url(#topPat)", "the top should wear the day's pattern");
+    eq(doc.querySelectorAll("#topPat").length, 1, "exactly one pattern definition");
+  });
+  test("every control is a thumb-sized target with a visible focus ring", () => {
+    // Measured on a phone: six of eight controls were under 44px and three showed no focus
+    // indicator at all. Sizes are checked on the real elements; the ring is checked as a
+    // rule (and live, when this frame can take focus) and for contrast on every paper.
+    const sheets = ["settings", "drawer"].map(id => doc.getElementById(id));
+    doc.getElementById("drawerBtn").click();
+    sheets.forEach(sh => sh.classList.add("open"));
+    const controls = [...doc.querySelectorAll("button, a[href], summary, input")].filter(e => e.getClientRects().length);
+    ok(controls.length >= 30, "expected the page's controls plus the drawer's chips, found " + controls.length);
+    const bad = [];
+    app.focus();
+    for (const e of controls) {
+      const b = e.getBoundingClientRect(), name = e.id || e.dataset.label || e.className || e.tagName;
+      if (b.height < 44 || b.width < 44) bad.push(name + " is " + Math.round(b.width) + "x" + Math.round(b.height));
+      e.focus();
+      if (!doc.hasFocus() || !e.matches(":focus-visible")) continue;
+      const cs = app.getComputedStyle(e);
+      if (cs.outlineStyle === "none" || parseFloat(cs.outlineWidth) < 2) bad.push(name + " shows no focus ring");
     }
+    sheets.forEach(sh => sh.classList.remove("open"));
+    eq(bad.length, 0, bad.slice(0, 6).join("; "));
+    let ring = null; const killers = [];
+    for (const sh of doc.styleSheets) {
+      let rules; try { rules = sh.cssRules; } catch (e) { continue; }       // the font sheet is cross-origin
+      for (const r of rules) {
+        if (!r.style) continue;
+        if (r.selectorText === ":focus-visible") ring = r.style;
+        else if (r.style.outlineStyle === "none" || /^0/.test(r.style.outlineWidth)) killers.push(r.selectorText);
+      }
+    }
+    ok(ring && ring.outlineStyle === "solid" && parseFloat(ring.outlineWidth) >= 2, "no global :focus-visible ring");
+    eq(killers.length, 0, "these rules remove the focus ring: " + killers.join(", "));
+    const cssVar = n => app.getComputedStyle(doc.documentElement).getPropertyValue(n).trim();
+    for (const c of A.PALETTE) {
+      A.paintPage(c.hex);
+      for (const bg of ["--card", "--paper"])
+        ok(ratio(cssVar("--day-deep"), cssVar(bg)) >= 3, "the focus ring is faint on a " + c.label + " day (" + bg + ")");
+    }
+    A.renderAll();
   });
   test("a theme week is named once, by the banner", () => {
     // The banner and the verse both used to say "<emoji> <name>. <note>." - the same
@@ -728,60 +765,19 @@ function run() {
     localStorage.removeItem("toga.nfl");
     if (saved) localStorage.setItem("toga.region", saved); else localStorage.removeItem("toga.region");
   });
-  group("outfit · the pairing rules");
+  group("outfit · colour on top, one piece below");
   const trousers = new Set(A.BOTTOMS.map(b => b.label));
-  const pieces = f => [f.hero].concat(f.pair);              // everything shown today
-  test("an outfit always fills the day's piece and two options", () => {
-    for (let i = 0; i < SPAN; i += 5) for (const mode of ["top", "bottom"]) {
-      const d = dayAt(i), f = A.outfitFor(d, A.colorForDate(d), mode);
-      ok(f.hero && f.hero.label && /^#[0-9a-f]{6}$/i.test(f.hero.hex), "bad hero on " + d.toDateString());
-      ok(f.pair.length >= 1, "no options on " + d.toDateString());
-      for (const p of f.pair) ok(p && p.label && /^#[0-9a-f]{6}$/i.test(p.hex), "bad option on " + d.toDateString());
-      eq(f.role === "top" ? "bottom" : "top", f.pairRole, "option role contradicts the hero role");
-    }
-  });
-  test("the two options are always different from each other", () => {
-    for (let i = 0; i < SPAN; i++) for (const mode of ["top", "bottom"]) {
-      const d = dayAt(i), f = A.outfitFor(d, A.colorForDate(d), mode);
-      if (f.mono) continue;
-      eq(f.pair.length, 2, "expected two options on " + d.toDateString());
-      ok(f.pair[0].label !== f.pair[1].label, "both options were " + f.pair[0].label + " on " + d.toDateString());
-    }
-  });
-  test("the day's color lands on the piece the mode names", () => {
-    for (let i = 0; i < SPAN; i += 5) {
-      const d = dayAt(i), c = A.colorForDate(d).shade.name;
-      eq(A.outfitFor(d, A.colorForDate(d), "top").hero.label, c, "top mode on " + d.toDateString());
-      eq(A.outfitFor(d, A.colorForDate(d), "bottom").hero.label, c, "bottom mode on " + d.toDateString());
-    }
-  });
-  test("trouser options are always something people own", () => {
+  const ANY = { bottoms: [], tops: [] };
+  const hexOK = h => /^#[0-9a-f]{6}$/i.test(h || "");
+  const fitOn = (i, own) => { const d = dayAt(i), r = A.colorForDate(d); return [A.outfitFor(d, r, own || ANY), r, d]; };
+  test("an outfit is the day's colour on top and one piece below", () => {
     for (let i = 0; i < SPAN; i++) {
-      const d = dayAt(i), f = A.outfitFor(d, A.colorForDate(d), "top");
-      for (const p of f.pair) ok(trousers.has(p.label) || A.PANTS_OK.includes(p.label), p.label + " trousers on " + d.toDateString());
+      const [f, r, d] = fitOn(i);
+      eq(f.hero.label, r.shade.name, "the top is not the day's colour on " + d.toDateString());
+      ok(hexOK(f.hero.hex) && f.bottom && f.bottom.label && hexOK(f.bottom.hex), "bad piece on " + d.toDateString());
+      ok(f.mono || trousers.has(f.bottom.label), f.bottom.label + " trousers on " + d.toDateString());
+      ok(f.mono || f.bottom.label !== f.hero.label, f.bottom.label + " suggested above and below on " + d.toDateString());
     }
-  });
-  test("never two loud pieces — in either option", () => {
-    for (let i = 0; i < SPAN; i++) for (const mode of ["top", "bottom"]) {
-      const d = dayAt(i), r = A.colorForDate(d), f = A.outfitFor(d, r, mode);
-      if (A.isQuiet(r.shade.name)) continue;
-      // trousers are all behaved by construction, so only the top is held to the quiet rule
-      const onBottoms = f.pairRole === "bottom";
-      for (const p of f.pair) ok(onBottoms ? (A.isQuiet(p.label) || trousers.has(p.label)) : A.isQuiet(p.label),
-        r.shade.name + " got loud " + f.pairRole + " option " + p.label + " on " + d.toDateString());
-    }
-  });
-  test("trouser options aren't two of the same register where a choice exists", () => {
-    // the second option should read as a genuinely different suggestion, not a synonym
-    let mixed = 0, same = 0;
-    for (let i = 0; i < SPAN; i++) {
-      const f = A.outfitFor(dayAt(i), A.colorForDate(dayAt(i)), "top");
-      const reg = f.pair.map(p => A.BOTTOMS.find(b => b.label === p.label)?.neutral);
-      if (reg.some(r => r === undefined)) continue;
-      reg[0] === reg[1] ? same++ : mixed++;
-    }
-    ok(mixed > 0, "never produced a mixed-register pair in two years");
-    ok(same / (same + mixed) < 0.85, "options are same-register " + Math.round(100 * same / (same + mixed)) + "% of the time");
   });
   test("no shade list suggests denim (office dress codes ban it)", () => {
     const banned = /denim|jean|indigo|dark wash/i;
@@ -789,48 +785,96 @@ function run() {
     for (const [name, text] of lists) ok(!banned.test(text), name + " suggests denim: " + text);
     ok(!banned.test(doc.body.innerText), "the word denim appears on screen");
   });
-  test("the day's own color is never offered as the accompanying piece", () => {
-    for (let i = 0; i < SPAN; i++) for (const mode of ["top", "bottom"]) {
-      const d = dayAt(i), f = A.outfitFor(d, A.colorForDate(d), mode);
-      if (f.mono) continue;
-      for (const p of f.pair) ok(p.label !== f.hero.label, p.label + " offered alongside itself on " + d.toDateString());
-    }
-  });
   test("Monochrome Week is the same color top and toe", () => {
     let seen = 0;
     for (let i = 0; i < SPAN; i++) {
-      const d = dayAt(i), r = A.colorForDate(d);
+      const [f, r, d] = fitOn(i);
       if (!r.theme || r.theme.name !== "Monochrome Week") continue;
       seen++;
-      const f = A.outfitFor(d, r, "top");
       ok(f.mono, "not flagged monochrome on " + d.toDateString());
-      eq(f.hero.label, r.shade.name);
+      eq(f.bottom.label, r.shade.name);
     }
     ok(seen > 0, "never found a Monochrome Week to test");
   });
-  test("an implausible trouser color always offers a way out", () => {
-    for (let i = 0; i < SPAN; i++) {
-      const d = dayAt(i), c = A.colorForDate(d).shade.name;
-      const plausible = trousers.has(c) || A.PANTS_OK.includes(c);
-      const note = A.outfitFor(d, A.colorForDate(d), "bottom").note;
-      if (plausible) ok(!/big ask/.test(note), c + " is wearable but got the caveat on " + d.toDateString());
-      else ok(/big ask/.test(note), c + " trousers got no caveat on " + d.toDateString());
-    }
-  });
   test("the outfit doesn't change during the day", () => {
-    const sig = f => f.hero.label + "/" + f.pair.map(p => p.label).join("+");
-    for (let i = 0; i < SPAN; i += 5) for (const mode of ["top", "bottom"]) {
-      const d = dayAt(i), late = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 22, 10);
-      eq(sig(A.outfitFor(d, A.colorForDate(d), mode)), sig(A.outfitFor(late, A.colorForDate(late), mode)),
-         "outfit drifted on " + d.toDateString());
+    for (let i = 0; i < SPAN; i += 5) {
+      const [f, , d] = fitOn(i), late = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 22, 10);
+      eq(A.outfitFor(late, A.colorForDate(late), ANY).bottom.label, f.bottom.label, "outfit drifted on " + d.toDateString());
     }
   });
-  test("every note names a piece that is actually shown", () => {
-    for (let i = 0; i < SPAN; i += 5) for (const mode of ["top", "bottom"]) {
-      const d = dayAt(i), f = A.outfitFor(d, A.colorForDate(d), mode);
-      const plain = f.note.replace(/<\/?b>/g, "");
-      ok(pieces(f).some(p => plain.includes(p.label)), "note names nothing shown: " + plain);
+  test("the note names the piece below, and says an accent is enough", () => {
+    for (let i = 0; i < SPAN; i += 5) {
+      const [f] = fitOn(i), plain = f.note.replace(/<\/?b>/g, "");
+      ok(plain.includes(f.bottom.label), "note names nothing shown: " + plain);
+      ok(f.mono || /accent/.test(plain), "no accent line: " + plain);
     }
+  });
+  test("a ticked drawer limits the piece below to what is owned", () => {
+    const mine = { bottoms: ["Khaki", "Black"], tops: [] }, one = { bottoms: ["Blue"], tops: [] };
+    for (let i = 0; i < SPAN; i++) {
+      const [f, r, d] = fitOn(i, mine);
+      eq(f.hero.label, r.shade.name, "the drawer changed the day's colour on " + d.toDateString());
+      ok(f.mono || mine.bottoms.includes(f.bottom.label), f.bottom.label + " is not in the drawer, on " + d.toDateString());
+      // one pair of trousers is still an answer, even on a Blue day
+      const [g] = fitOn(i, one);
+      ok(g.mono || g.bottom.label === "Blue", "suggested " + g.bottom.label + " to someone who owns only Blue");
+    }
+  });
+  test("a top that is not in the drawer gets the accent line, never a different colour", () => {
+    const [f0, r] = fitOn(40), other = A.PALETTE.find(c => c.label !== r.shade.name).label;
+    const [without] = fitOn(40, { bottoms: [], tops: [other] }), [withIt] = fitOn(40, { bottoms: [], tops: [r.shade.name] });
+    eq(without.hero.label, f0.hero.label);
+    ok(f0.mono || /drawer/.test(without.note), "no drawer line: " + without.note);
+    ok(!/drawer/.test(withIt.note) && !/drawer/.test(f0.note), "drawer line shown to someone who owns the colour");
+  });
+  test("the drawer is read from this device, and an empty one changes nothing", () => {
+    const keep = localStorage.getItem("toga.own");
+    let i = 0; while (fitOn(i)[0].mono) i++;
+    const [f, r, d] = fitOn(i);
+    localStorage.removeItem("toga.own");
+    eq(A.outfitFor(d, r).bottom.label, f.bottom.label, "an empty drawer changed the suggestion");
+    localStorage.setItem("toga.own", JSON.stringify({ bottoms: ["Wine"], tops: [] }));
+    eq(A.outfitFor(d, r).bottom.label, "Wine");
+    if (keep === null) localStorage.removeItem("toga.own"); else localStorage.setItem("toga.own", keep);
+  });
+
+  group("outfit · the patterned top");
+  const hueOf = hex => { const [r, g, b] = A.hexRGB(hex).map(v => v / 255), mx = Math.max(r, g, b), d = mx - Math.min(r, g, b);
+    if (d < 0.04) return null;
+    return ((mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4) * 60 + 360) % 360; };
+  test("every colour's four shades are distinct and stay in its own family", () => {
+    for (const c of A.PALETTE) {
+      const s = A.shadesOf(c.hex), h0 = hueOf(c.hex);
+      eq(s[0].toLowerCase(), c.hex.toLowerCase(), "the day's own colour should lead");
+      eq(new Set(s.map(x => x.toLowerCase())).size, 4, c.label + " shades are not distinct: " + s.join(" "));
+      for (const x of s) {
+        ok(hexOK(x), c.label + " produced " + x);
+        const h = hueOf(x);
+        if (h0 === null) { const v = A.hexRGB(x); ok(Math.max(...v) - Math.min(...v) < 40, "a shade of " + c.label + " picked up a colour: " + x); continue; }
+        if (h === null) continue;
+        const dh = Math.abs(h - h0);
+        ok(Math.min(dh, 360 - dh) <= 14, "a shade of " + c.label + " drifted " + Math.round(Math.min(dh, 360 - dh)) + " degrees: " + x);
+      }
+    }
+  });
+  test("the top's pattern is drawn only from those shades, on the day's colour", () => {
+    for (const c of A.PALETTE) for (let i = 0; i < 40; i++) {
+      const p = A.topPattern(dayAt(i), c.hex, false);
+      const used = [...p.svg.matchAll(/(?:fill|stroke)="(#[0-9a-f]{6})"/gi)].map(m => m[1].toLowerCase());
+      eq(used[0], c.hex.toLowerCase(), p.kind + " is not grounded in " + c.label);
+      ok(new Set(used).size >= 2, p.kind + " on " + c.label + " is one flat colour");
+      for (const u of used) ok(p.shades.map(x => x.toLowerCase()).includes(u), p.kind + " uses a colour outside " + c.label + ": " + u);
+    }
+  });
+  test("the weave changes from day to day, holds through the day, and a flannel day is plaid", () => {
+    const hex = A.byLabel("Blue").hex, kinds = new Set();
+    for (let i = 0; i < 120; i++) {
+      const d = dayAt(i), late = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 22, 10), k = A.topPattern(d, hex, false).kind;
+      eq(A.topPattern(late, hex, false).kind, k, "the weave drifted on " + d.toDateString());
+      kinds.add(k);
+    }
+    eq(kinds.size, A.TOP_KINDS.length, "only saw " + [...kinds].join(", "));
+    eq(A.topPattern(dayAt(3), hex, true).kind, "plaid");
   });
 
   // ---------------------------------------------------------------- region
