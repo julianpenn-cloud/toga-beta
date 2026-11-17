@@ -555,7 +555,8 @@ function run() {
     const worst = [];
     for (const c of A.PALETTE) {
       const surf = glow(c.hex);
-      for (const [sel, min, op] of [[".name", 3, 1], [".team", 4.5, 1], [".hex", 4.5, 0.92], [".eyebrow", 4.5, 0.92]]) {
+      for (const [sel, min, op] of [[".name", 3, 1], [".team", 4.5, 1], [".hex", 4.5, 0.92], [".eyebrow", 4.5, 0.92],
+                                    [".plaque-month", 4.5, 0.92], [".plaque-day", 4.5, 1]]) {
         const ink = app.getComputedStyle(sw.querySelector(sel)).color;
         const srgb = A.hexRGB(surf);
         const eff = "#" + A.hexRGB(toHex(ink))
@@ -850,27 +851,23 @@ function run() {
       ok(shirt.width >= 130, "the shirt renders at " + Math.round(shirt.width) + "px");
     }
   });
-  test("the date is printed on the shirt, and reads on every colour", () => {
-    const cr = (a, b) => { const lum = h => { const [r, g, bl] = A.hexRGB(h).map(v => { v /= 255;
-        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
-      return 0.2126*r + 0.7152*g + 0.0722*bl; };
-      const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
-    for (const c of A.PALETTE) {
-      const i = A.PALETTE.indexOf(c), d = new Date(2026, i % 12, (i % 27) + 1);
-      const m = A.dateMark(c.hex, d);
-      const plate = (m.match(/circle cx="32" cy="41" r="10" fill="(#[0-9a-f]{6})"/i) || [])[1];
-      ok(plate, c.label + " produced no plate");
-      const inks = [...m.matchAll(/fill="(#[0-9a-f]{6})"/gi)].map(x => x[1])
-        .filter(x => x.toLowerCase() !== plate.toLowerCase());
-      ok(inks.length >= 1, c.label + " produced no lettering");
-      for (const ink of inks)
-        ok(cr(ink, plate) >= 4.5, c.label + ": the date is only " + cr(ink, plate).toFixed(2) + ":1 on its plate");
-      ok(m.includes(">" + d.getDate() + "<"), c.label + " does not print the day number");
-      ok(m.includes(A.MONTHS[d.getMonth()].toUpperCase()), c.label + " does not print the month");
-    }
+  test("the date is on a plaque under the shirt, not printed on it", () => {
     A.renderHero(new Date(2026, 11, 25));
-    const dec = doc.getElementById("heroPair").innerHTML;
-    ok(dec.includes("DEC") && dec.includes(">25<"), "the rendered shirt does not print 25 December");
+    const shirt = doc.getElementById("heroPair");
+    ok(!/date-mark|<text/.test(shirt.innerHTML), "the shirt still carries something printed on it");
+    const month = doc.getElementById("plaqueMonth"), day = doc.getElementById("plaqueDay");
+    eq(month.textContent, "December", "the plaque does not name the month");
+    eq(day.textContent, "25", "the plaque does not carry the day");
+    // it sits below the shirt, and centred on it
+    const sb = shirt.getBoundingClientRect(), pb = doc.querySelector(".plaque").getBoundingClientRect();
+    ok(pb.top >= sb.bottom - 2, "the plaque is not below the shirt");
+    near(pb.left + pb.width / 2, sb.left + sb.width / 2, 3, "the plaque is not centred on the shirt");
+    // and it follows whichever day is being shown
+    A.renderHero(new Date(2026, 0, 5));
+    eq(doc.getElementById("plaqueMonth").textContent, "January", "the month did not follow the day");
+    eq(doc.getElementById("plaqueDay").textContent, "5");
+    A.renderHero(new Date(2026, 8, 21));
+    eq(doc.getElementById("plaqueMonth").textContent, "September");
   });
   const hueOf = hex => { const [r, g, b] = A.hexRGB(hex).map(v => v / 255), mx = Math.max(r, g, b), d = mx - Math.min(r, g, b);
     if (d < 0.04) return null;

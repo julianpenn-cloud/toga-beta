@@ -312,6 +312,24 @@
   .hero-pair .garment { width: var(--g); height: var(--g); margin: 0;
                         filter: drop-shadow(0 8px 18px rgba(34, 48, 31, 0.20)); }
   .hero-pair .garment.hero-garment { width: calc(var(--g) * 1.22); height: calc(var(--g) * 1.22); }
+  /* The date, on a plate under the shirt. Its ornaments are the ones the app already speaks:
+     gold hairlines with a small diamond at each end, letterspaced small caps, and the day set
+     large in the reading serif. Ink rather than the day's colour, so it reads on every paper. */
+  .plaque {
+    align-self: center; display: inline-flex; align-items: baseline; gap: 11px;
+    margin: 13px auto 0; padding: 8px 26px 9px; position: relative;
+    border-top: 2px solid var(--gold); border-bottom: 1px solid var(--gold);
+  }
+  .plaque::before, .plaque::after {
+    content: ""; position: absolute; top: 50%; width: 5px; height: 5px;
+    background: var(--gold); transform: translateY(-50%) rotate(45deg);
+  }
+  .plaque::before { left: 3px; }
+  .plaque::after { right: 3px; }
+  .plaque-month { font-family: Inter, sans-serif; font-size: 10.5px; font-weight: 700;
+                  letter-spacing: 2.4px; text-transform: uppercase; color: var(--ink); opacity: 0.92; }
+  .plaque-day { font-family: "EB Garamond", Georgia, serif; font-size: 30px; font-weight: 600;
+                line-height: 1; color: var(--ink); font-variant-numeric: lining-nums; }
   .swatch .defs { position: absolute; width: 0; height: 0; }
   .fit-shades { display: flex; flex-direction: column; gap: 9px; }
   .fit-shade { font-size: 12.5px; line-height: 1.35; }
@@ -523,6 +541,8 @@
         </div>
         <div class="hex" id="swHex"></div>
         <div class="hero-pair" id="heroPair"></div>
+        <div class="plaque"><span class="plaque-month" id="plaqueMonth"></span>
+          <span class="plaque-day" id="plaqueDay"></span></div>
         <div class="tagline" id="swTag"></div>
         <div class="flannel" id="swFlannel" hidden>🍂 Add a flannel if it works</div>
       </div>
@@ -1398,7 +1418,7 @@ function meaningFor(date, r, lat) {
 // The build number, in one place. It renders beside the wordmark and in the footer, and it is
 // the service worker's cache name too — so the number a person can read is provably the build
 // their browser cached. The suite asserts those two stay equal; bump it on every ship.
-const VERSION = "v30";
+const VERSION = "v31";
 
 const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 
@@ -1638,6 +1658,8 @@ function renderHero(date) {
     : r.dayName + " · " + r.season.emoji + " " + r.season.name + " · " + r.moon.emoji + " " + r.moon.name
       + (r.wx ? " · " + MOOD[r.wx.mood].emoji : "") + (r.weekend ? " — off-duty" : "");
   el("swFlannel").hidden = !r.isFlannel;
+  el("plaqueMonth").textContent = MONTHS[date.getMonth()];
+  el("plaqueDay").textContent = date.getDate();
 
   // Theme-week banner — during the week, and the week before as a heads-up.
   // Border is a gradient of the theme's own colors.
@@ -1743,36 +1765,17 @@ function topPattern(date, hex, flannel) {
 }
 // The second path lays the hero's light onto the cloth. Same idea as the stained glass,
 // on the material you actually wear.
-//  The date, printed on the chest like a badge: the month over the day, on a plate with a rule
-//  above and below it. Plate and lettering are picked from the two house inks by contrast, so
-//  the same mark stays legible on every colour — on Black the plate goes cream, on White it goes
-//  deep, and on the mid-tones it takes whichever of the two separates better from the fabric.
-const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-function dateMark(hex, date) {
-  const deep = inkOf(hex, "#46494c"), light = "#f7f3ea";
-  const plate = contrastRatio(light, hex) > contrastRatio(deep, hex) ? light : deep;
-  const ink = plate === light ? deep : light;
-  const rule = y => `<line x1="25.9" y1="${y}" x2="38.1" y2="${y}" stroke="${ink}" stroke-width="0.45" opacity="0.8"/>`;
-  return `<g class="date-mark">`
-    + `<circle cx="32" cy="41" r="10" fill="${plate}"/>`
-    + rule(34.6)
-    + `<text x="32" y="33.4" text-anchor="middle" fill="${ink}" font-family="Inter, sans-serif"`
-    + ` font-size="4.1" font-weight="700" letter-spacing="0.55">${MONTHS[date.getMonth()].toUpperCase()}</text>`
-    + `<text x="32" y="47.4" text-anchor="middle" fill="${ink}" font-family="EB Garamond, Georgia, serif"`
-    + ` font-size="12" font-weight="600">${date.getDate()}</text>`
-    + rule(50) + `</g>`;
-}
-const garmentSVG = (kind, hex, hero, pat, mark) =>
+const MONTHS = ["January","February","March","April","May","June",
+                "July","August","September","October","November","December"];
+const garmentSVG = (kind, hex, hero, pat) =>
   `<svg class="garment${hero ? " hero-garment" : ""}" viewBox="0 0 64 64" aria-hidden="true">${pat ? `<defs>${pat.svg}</defs>` : ""}`
-  + `<path d="${GARMENT[kind]}" fill="${pat ? "url(#topPat)" : hex}" stroke="rgba(34,48,31,0.35)" stroke-width="1.4" stroke-linejoin="round"/>`
-  + (mark || "")
+  + `<path d="${GARMENT[kind]}" fill="${pat ? "url(#topPat)" : hex}" stroke="rgba(34,48,31,0.30)" stroke-width="0.9" stroke-linejoin="round"/>`
   + `<path d="${GARMENT[kind]}" fill="url(#clothSheen)" style="mix-blend-mode:soft-light"/></svg>`;
 
 function renderOutfit(date, r) {
   r = r || colorForDate(date);
   const fit = outfitFor(r);
-  el("heroPair").innerHTML = garmentSVG("top", fit.hero.hex, true,
-    topPattern(date, fit.hero.hex, r.isFlannel), dateMark(fit.hero.hex, date));
+  el("heroPair").innerHTML = garmentSVG("top", fit.hero.hex, true, topPattern(date, fit.hero.hex, r.isFlannel));
   el("fitShades").innerHTML = `<div class="fit-shade"><span class="role">Any shade</span> <i>${fit.hero.alias}</i></div>`;
   el("fitNote").innerHTML = fit.note;
   el("fitEasy").textContent = easyLine(date);
@@ -1908,7 +1911,7 @@ window.TOGA = {
   renderHero,   // renders ANY day's hero + banner + verse: the suite tests theme weeks with it
   stadiumFor, winsOf, isMinnesota, rawColorFor, applyScore,   // the stadium rule, as testable pieces
   moodFromCode, regionOf, paintPage, contrastText, renderAll, hexRGB, easyLine,
-  shadesOf, topPattern, TOP_KINDS, dateMark, MONTHS,   // the patterned top and its date badge
+  shadesOf, topPattern, TOP_KINDS, MONTHS,   // the patterned top, and the month names
   // sky — real astronomy, all computed locally
   skyFor, solarLongitude, solarDeclination, dayLengthHours, dayLengthDeltaMinutes,
   solarNoonAltitude, nextSeasonMark, meteorShower, dayOfYear, daysInYear,
