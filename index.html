@@ -876,7 +876,7 @@ function verseFor(d, r) {
   const pick = arr => arr[roll % arr.length];
   const lines = [];
   if (r.holiday) lines.push(r.holiday.emoji + " " + r.holiday.name + " — " + r.holiday.note + ".");
-  else if (r.vikings) lines.push("🏈 The Vikings " + r.vikings + " the day before." + (r.stadium ? " Purple, then." : ""));
+  else if (r.vikings) lines.push("🏈 The Vikings " + r.vikings + " the day before. Purple, then.");
   if (pool.length) lines.push(pick(pool));
   const tail = r.isFlannel ? pick(FLANNEL_LINES) : r.weekend ? pick(WEEKEND_LINES) : null;
   return { body: lines.join("\n"), tail };
@@ -968,8 +968,8 @@ async function refreshWeather() {
 //  Nothing here calls a sports API from the browser: the score arrives as nfl.json, written
 //  by .github/workflows/vikings.yml. There is a test forbidding a remote score URL in here.
 //  Scoped to Minnesota's zip prefixes (550-567) so every other Toga is exactly as it was,
-//  and it sits BELOW holidays and theme weeks: a holiday names its own colour, and a theme
-//  week promises one family for all five days. Either way the win still gets said.
+//  and it outranks theme weeks and week-long holidays (Halloween Week, Christmas Week):
+//  the day after a win is Purple even inside them. A single-day holiday keeps its day.
 //  The score comes from a key-less public scoreboard, locked into localStorage the same way
 //  the forecast is, and a failed fetch just means no easter egg. Never a dependency.
 // ---------------------------------------------------------------
@@ -1496,14 +1496,12 @@ function withColor(ctx, c, holiday) {
 }
 //  The color a day picks on its own, before the no-repeat rule.
 function rawColorFor(d, ctx) {
-  const hol = holidayFor(d);
-  if (hol) return withColor(ctx, hol.color, hol);
-  const win = stadiumNote(d);
-  // Forced only when nothing bigger is happening. `stadium` marks it so the no-repeat rule
-  // leaves it alone, exactly as it leaves holidays alone.
-  if (win && !ctx.theme) return { ...withColor(ctx, byLabel("Purple"), null), stadium: true, vikings: win };
-  const r = withColor(ctx, pickColor(d, ctx.wx), null);
-  return win ? { ...r, vikings: win } : r;
+  const hol = holidayFor(d), win = stadiumNote(d);
+  // A win outranks theme weeks and week-long holidays (one Purple day inside the week);
+  // a single-day holiday keeps its day. `stadium` exempts it from the no-repeat rule.
+  if (hol && !(win && hol.range)) return withColor(ctx, hol.color, hol);
+  if (win) return { ...withColor(ctx, byLabel("Purple"), null), stadium: true, vikings: win };
+  return withColor(ctx, pickColor(d, ctx.wx), null);
 }
 
 function colorForDate(date) {
@@ -1532,9 +1530,7 @@ function colorForDate(date) {
       const active = [...new Set(paletteFor(d, ctx.wx))];
       const at = active.findIndex(c => c.label === r.shade.name);
       if (active.length > 1 && at >= 0) {
-        const said = r.vikings;                // the bump changes the colour, not the news
         r = withColor(ctx, active[(at + (active.length > 4 ? 3 : 1)) % active.length], null);
-        if (said) r.vikings = said;
       }
     }
     colorCache.set(cacheKey(d), r);

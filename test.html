@@ -693,25 +693,40 @@ function run() {
     localStorage.removeItem("toga.nfl");
     if (saved) localStorage.setItem("toga.region", saved); else localStorage.removeItem("toga.region");
   });
-  test("a win forces Purple only when nothing bigger is happening", () => {
-    const d = new Date(), y = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1);
-    const ym = y.getFullYear() + "-" + String(y.getMonth() + 1).padStart(2, "0") + "-" + String(y.getDate()).padStart(2, "0");
+  test("a win outranks theme weeks and holiday weeks, but not a single-day holiday", () => {
+    const iso = x => x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getDate()).padStart(2, "0");
+    const saved = localStorage.getItem("toga.region");
     localStorage.setItem("toga.region", "554");
-    localStorage.setItem("toga.nfl", JSON.stringify({ gameYmd: ym, won: true, opponent: "Chicago Bears", region: "554" }));
-    const plain = A.rawColorFor(d, { theme: null, wx: null, weekend: false });
+    const setWin = (d, on) => { const y = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1);
+      localStorage.setItem("toga.nfl", JSON.stringify({ wins: on ? [{ ymd: iso(y), opponent: "Chicago Bears" }] : [], region: "554" })); };
+    const ctx = { theme: null, wx: null, weekend: false };
+    let d = new Date(2026, 5, 10);
+    setWin(d, false);
+    while (A.rawColorFor(d, ctx).holiday) d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+    setWin(d, true);
+    const plain = A.rawColorFor(d, ctx);
     eq(plain.shade.name, "Purple", "a win should force Purple");
-    ok(plain.stadium === true, "and be marked so the no-repeat rule leaves it alone");
-    ok(plain.vikings, "and be said");
-    // a theme week outranks it - stated, not forced
+    ok(plain.stadium === true && plain.vikings, "marked for the no-repeat rule, and said");
     const themed = A.rawColorFor(d, { theme: { name: "Jewel Tone Week" }, wx: null, weekend: false });
-    ok(themed.shade.name !== "Purple" || true, "");
-    ok(themed.vikings, "the win should still be said during a theme week");
-    ok(!themed.stadium, "but not forced");
-    // a loss forces nothing
-    localStorage.setItem("toga.nfl", JSON.stringify({ gameYmd: ym, won: false, opponent: "Chicago Bears", region: "554" }));
-    const lost = A.rawColorFor(d, { theme: null, wx: null, weekend: false });
-    ok(!lost.vikings && !lost.stadium, "a loss should do nothing");
+    eq(themed.shade.name, "Purple", "a win outranks a theme week");
+    setWin(d, false);
+    const lost = A.rawColorFor(d, ctx);
+    ok(!lost.vikings && !lost.stadium, "no win, no claim");
+    // a week-long holiday gives up one day to the win
+    const wk = A.HOLIDAYS.find(h => h.range), wd = new Date(2026, wk.range.from[0] - 1, wk.range.from[1]);
+    setWin(wd, false);
+    ok(A.rawColorFor(wd, ctx).holiday, wk.name + " should hold without a win");
+    setWin(wd, true);
+    const inWeek = A.rawColorFor(wd, ctx);
+    eq(inWeek.shade.name, "Purple", "a win outranks " + wk.name);
+    ok(!inWeek.holiday, "and the day is no longer presented as the holiday");
+    // a single-day holiday keeps its day
+    const one = A.HOLIDAYS.find(h => h.when), sd = new Date(2026, one.when[0] - 1, one.when[1]);
+    setWin(sd, true);
+    const single = A.rawColorFor(sd, ctx);
+    ok(single.holiday && single.holiday.name === one.name && !single.stadium, one.name + " should keep its day");
     localStorage.removeItem("toga.nfl");
+    if (saved) localStorage.setItem("toga.region", saved); else localStorage.removeItem("toga.region");
   });
   group("outfit · the pairing rules");
   const trousers = new Set(A.BOTTOMS.map(b => b.label));
