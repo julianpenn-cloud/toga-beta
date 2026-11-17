@@ -49,6 +49,7 @@
 // ---------------------------------------------------------------- harness
 const out = document.getElementById("out");
 const res = [];
+let t0 = 0;
 let suite = "";
 function group(name) { suite = name; const h = document.createElement("div"); h.className = "suite"; h.textContent = name; out.appendChild(h); }
 function test(name, fn) {
@@ -70,7 +71,7 @@ function run() {
   const app = frame.contentWindow;
   const A = app.TOGA;                              // the app's published test surface
   const doc = frame.contentDocument;
-  const t0 = performance.now();
+  t0 = performance.now();
 
   // don't disturb whatever the reader had stored
   const saved = {};
@@ -231,6 +232,18 @@ function run() {
 
   // ---------------------------------------------------------------- brand
   group("brand · classic wordmark, independent of any CDN");
+  test("the build number is shown beside the wordmark and in the footer", () => {
+    // One number, one place in the source. It renders in both spots, and it is also the
+    // service worker's cache name (checked after this run, since that needs a fetch), so a
+    // person can read the page and know which build their browser actually cached.
+    eq(A.VERSION, doc.getElementById("hdrVer").textContent, "the header does not show the build number");
+    eq(A.VERSION, doc.getElementById("ftrVer").textContent, "the footer does not show the build number");
+    ok(/^v\d+$/.test(A.VERSION), "the build number is not v<digits>: " + A.VERSION);
+    for (const id of ["hdrVer", "ftrVer"]) {
+      const box = doc.getElementById(id).getBoundingClientRect();
+      ok(box.width > 0 && box.height > 0, id + " is in the page but not visible");
+    }
+  });
   test("the wordmark is set in the inlined face, and it loaded", () => {
     const wm = doc.querySelector(".wordmark");
     ok(wm, "no wordmark in the page");
@@ -889,6 +902,11 @@ function run() {
   }
 
   // ---------------------------------------------------------------- report
+  report();
+  checkVersion();
+}
+
+function report() {
   const failed = res.filter(r => !r.ok);
   const ms = Math.round(performance.now() - t0);
   const banner = document.getElementById("banner");
@@ -900,6 +918,23 @@ function run() {
   document.title = (failed.length ? "✗ " + failed.length + "/" + res.length : "✓ " + res.length) + " · Toga tests";
   window.__toga = { passed: res.length - failed.length, failed: failed.length, total: res.length, ms,
                     failures: failed.map(f => f.suite + " › " + f.name + ": " + f.err) };
+}
+
+// The one check that needs the network: the number on screen must be the cache name, or it
+// stops meaning "the build my browser cached" — which is the whole reason it is visible.
+async function checkVersion() {
+  const app = frame.contentWindow;
+  let good = false, note = "";
+  try {
+    const txt = await (await fetch("sw.js", { cache: "no-store" })).text();
+    const m = (txt.match(/VERSION\s*=\s*"([^"]+)"/) || [])[1];
+    const shown = app.TOGA && app.TOGA.VERSION;
+    good = !!m && m === shown;
+    note = good ? "" : "sw.js says " + m + ", the page shows " + shown;
+  } catch (e) { note = "could not read sw.js: " + e; }
+  res.push({ suite: "brand", name: "the shown build number is the service worker's cache name", ok: good, err: note });
+  report();
+  window.__togaDone = true;
 }
 </script>
 </body>
