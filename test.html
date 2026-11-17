@@ -838,6 +838,40 @@ function run() {
   });
 
   group("outfit · the patterned top");
+  test("the shirt is the biggest thing in its card", () => {
+    // It stopped being a glyph. Measured against the card rather than the viewport, so the
+    // assertion means the same thing at any width.
+    for (const d of [new Date(2026, 8, 21), new Date(2026, 0, 5), new Date(2026, 5, 14)]) {
+      A.renderHero(d);
+      const shirt = doc.querySelector("#heroPair .garment").getBoundingClientRect();
+      const card = doc.getElementById("swatch").getBoundingClientRect();
+      const share = shirt.width / card.width;
+      ok(share >= 0.40, "the shirt is only " + Math.round(100 * share) + "% of the card width");
+      ok(shirt.width >= 130, "the shirt renders at " + Math.round(shirt.width) + "px");
+    }
+  });
+  test("the date is printed on the shirt, and reads on every colour", () => {
+    const cr = (a, b) => { const lum = h => { const [r, g, bl] = A.hexRGB(h).map(v => { v /= 255;
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+      return 0.2126*r + 0.7152*g + 0.0722*bl; };
+      const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+    for (const c of A.PALETTE) {
+      const i = A.PALETTE.indexOf(c), d = new Date(2026, i % 12, (i % 27) + 1);
+      const m = A.dateMark(c.hex, d);
+      const plate = (m.match(/circle cx="32" cy="41" r="10" fill="(#[0-9a-f]{6})"/i) || [])[1];
+      ok(plate, c.label + " produced no plate");
+      const inks = [...m.matchAll(/fill="(#[0-9a-f]{6})"/gi)].map(x => x[1])
+        .filter(x => x.toLowerCase() !== plate.toLowerCase());
+      ok(inks.length >= 1, c.label + " produced no lettering");
+      for (const ink of inks)
+        ok(cr(ink, plate) >= 4.5, c.label + ": the date is only " + cr(ink, plate).toFixed(2) + ":1 on its plate");
+      ok(m.includes(">" + d.getDate() + "<"), c.label + " does not print the day number");
+      ok(m.includes(A.MONTHS[d.getMonth()].toUpperCase()), c.label + " does not print the month");
+    }
+    A.renderHero(new Date(2026, 11, 25));
+    const dec = doc.getElementById("heroPair").innerHTML;
+    ok(dec.includes("DEC") && dec.includes(">25<"), "the rendered shirt does not print 25 December");
+  });
   const hueOf = hex => { const [r, g, b] = A.hexRGB(hex).map(v => v / 255), mx = Math.max(r, g, b), d = mx - Math.min(r, g, b);
     if (d < 0.04) return null;
     return ((mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4) * 60 + 360) % 360; };

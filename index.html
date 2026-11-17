@@ -304,10 +304,13 @@
   /* Sized off the viewport rather than fixed: fixed widths overflowed the card at every
      phone width, and the hero's overflow:hidden cut the garment off rather than showing a
      scrollbar. Capped so desktop is unchanged. */
-  .hero-pair { --g: min(24vw, 110px);
+  /* The shirt is the page's centrepiece now: as wide as the card can comfortably take, and
+     lifted off the paper so it reads as a garment rather than a glyph. */
+  .hero-pair { --g: min(56vw, 190px);
                display: flex; align-items: flex-end; justify-content: center; gap: 14px;
-               width: 100%; margin: 6px 0 0; }
-  .hero-pair .garment { width: var(--g); height: var(--g); margin: 0; filter: none; }
+               width: 100%; margin: 16px 0 2px; }
+  .hero-pair .garment { width: var(--g); height: var(--g); margin: 0;
+                        filter: drop-shadow(0 8px 18px rgba(34, 48, 31, 0.20)); }
   .hero-pair .garment.hero-garment { width: calc(var(--g) * 1.22); height: calc(var(--g) * 1.22); }
   .swatch .defs { position: absolute; width: 0; height: 0; }
   .fit-shades { display: flex; flex-direction: column; gap: 9px; }
@@ -1395,7 +1398,7 @@ function meaningFor(date, r, lat) {
 // The build number, in one place. It renders beside the wordmark and in the footer, and it is
 // the service worker's cache name too — so the number a person can read is provably the build
 // their browser cached. The suite asserts those two stay equal; bump it on every ship.
-const VERSION = "v29";
+const VERSION = "v30";
 
 const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 
@@ -1740,15 +1743,36 @@ function topPattern(date, hex, flannel) {
 }
 // The second path lays the hero's light onto the cloth. Same idea as the stained glass,
 // on the material you actually wear.
-const garmentSVG = (kind, hex, hero, pat) =>
+//  The date, printed on the chest like a badge: the month over the day, on a plate with a rule
+//  above and below it. Plate and lettering are picked from the two house inks by contrast, so
+//  the same mark stays legible on every colour — on Black the plate goes cream, on White it goes
+//  deep, and on the mid-tones it takes whichever of the two separates better from the fabric.
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function dateMark(hex, date) {
+  const deep = inkOf(hex, "#46494c"), light = "#f7f3ea";
+  const plate = contrastRatio(light, hex) > contrastRatio(deep, hex) ? light : deep;
+  const ink = plate === light ? deep : light;
+  const rule = y => `<line x1="25.9" y1="${y}" x2="38.1" y2="${y}" stroke="${ink}" stroke-width="0.45" opacity="0.8"/>`;
+  return `<g class="date-mark">`
+    + `<circle cx="32" cy="41" r="10" fill="${plate}"/>`
+    + rule(34.6)
+    + `<text x="32" y="33.4" text-anchor="middle" fill="${ink}" font-family="Inter, sans-serif"`
+    + ` font-size="4.1" font-weight="700" letter-spacing="0.55">${MONTHS[date.getMonth()].toUpperCase()}</text>`
+    + `<text x="32" y="47.4" text-anchor="middle" fill="${ink}" font-family="EB Garamond, Georgia, serif"`
+    + ` font-size="12" font-weight="600">${date.getDate()}</text>`
+    + rule(50) + `</g>`;
+}
+const garmentSVG = (kind, hex, hero, pat, mark) =>
   `<svg class="garment${hero ? " hero-garment" : ""}" viewBox="0 0 64 64" aria-hidden="true">${pat ? `<defs>${pat.svg}</defs>` : ""}`
   + `<path d="${GARMENT[kind]}" fill="${pat ? "url(#topPat)" : hex}" stroke="rgba(34,48,31,0.35)" stroke-width="1.4" stroke-linejoin="round"/>`
+  + (mark || "")
   + `<path d="${GARMENT[kind]}" fill="url(#clothSheen)" style="mix-blend-mode:soft-light"/></svg>`;
 
 function renderOutfit(date, r) {
   r = r || colorForDate(date);
   const fit = outfitFor(r);
-  el("heroPair").innerHTML = garmentSVG("top", fit.hero.hex, true, topPattern(date, fit.hero.hex, r.isFlannel));
+  el("heroPair").innerHTML = garmentSVG("top", fit.hero.hex, true,
+    topPattern(date, fit.hero.hex, r.isFlannel), dateMark(fit.hero.hex, date));
   el("fitShades").innerHTML = `<div class="fit-shade"><span class="role">Any shade</span> <i>${fit.hero.alias}</i></div>`;
   el("fitNote").innerHTML = fit.note;
   el("fitEasy").textContent = easyLine(date);
@@ -1884,7 +1908,7 @@ window.TOGA = {
   renderHero,   // renders ANY day's hero + banner + verse: the suite tests theme weeks with it
   stadiumFor, winsOf, isMinnesota, rawColorFor, applyScore,   // the stadium rule, as testable pieces
   moodFromCode, regionOf, paintPage, contrastText, renderAll, hexRGB, easyLine,
-  shadesOf, topPattern, TOP_KINDS,           // the patterned top
+  shadesOf, topPattern, TOP_KINDS, dateMark, MONTHS,   // the patterned top and its date badge
   // sky — real astronomy, all computed locally
   skyFor, solarLongitude, solarDeclination, dayLengthHours, dayLengthDeltaMinutes,
   solarNoonAltitude, nextSeasonMark, meteorShower, dayOfYear, daysInYear,
